@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仓序食时</title>
+    <link rel="stylesheet" href="./colors_and_type.css">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@0.485.0/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style type="text/tailwindcss">
+@theme inline {
+  --color-background: var(--cangxu-bg);
+  --color-foreground: var(--cangxu-foreground);
+  --color-card: var(--cangxu-card);
+  --color-card-foreground: var(--cangxu-foreground);
+  --color-popover: var(--cangxu-card-2);
+  --color-popover-foreground: var(--cangxu-foreground);
+  --color-primary: var(--cangxu-primary-500);
+  --color-primary-foreground: var(--cangxu-white);
+  --color-secondary: var(--cangxu-primary-100);
+  --color-secondary-foreground: var(--cangxu-primary-800);
+  --color-muted: var(--cangxu-input-bg);
+  --color-muted-foreground: var(--cangxu-muted);
+  --color-accent: var(--cangxu-primary-100);
+  --color-accent-foreground: var(--cangxu-primary-800);
+  --color-destructive: var(--cangxu-error-text);
+  --color-destructive-foreground: var(--cangxu-white);
+  --color-border: var(--cangxu-border);
+  --color-input: var(--cangxu-border);
+  --color-ring: var(--cangxu-primary-300);
+  --color-error: var(--cangxu-error);
+  --color-warning: var(--cangxu-warning);
+  --color-info: var(--cangxu-info);
+  --color-success: var(--cangxu-success);
+  --color-pink-50: var(--cangxu-pink-100);
+  --color-pink-100: var(--cangxu-pink-100);
+  --color-pink-200: var(--cangxu-pink-200);
+  --color-pink-500: var(--cangxu-pink-500);
+  --color-cream-100: var(--cangxu-cream-100);
+  --color-cream-200: var(--cangxu-cream-200);
+  --color-cream-600: var(--cangxu-cream-600);
+  --color-mint-100: var(--cangxu-mint-100);
+  --color-mint-200: var(--cangxu-mint-200);
+  --color-mint-600: var(--cangxu-mint-600);
+  --color-taro-100: var(--cangxu-taro-100);
+  --color-taro-200: var(--cangxu-taro-200);
+  --color-taro-600: var(--cangxu-taro-600);
+  --color-white: #fff;
+  --radius-sm: var(--cangxu-radius-sm);
+  --radius-md: var(--cangxu-radius-md);
+  --radius-lg: var(--cangxu-radius-lg);
+  --radius-xl: var(--cangxu-radius-xl);
+  --radius-2xl: var(--cangxu-radius-2xl);
+  --radius-full: var(--cangxu-radius-full);
+}
+@layer base {
+  body { background: var(--cangxu-bg); color: var(--cangxu-foreground); }
+}
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] { display: inline-flex; align-items: center; justify-content: center; }
+      .cx-btn-destructive {
+        background: var(--cangxu-error-text);
+        color: var(--cangxu-white);
+      }
+      .cx-btn-destructive:hover { opacity: 0.9; }
+      .cx-btn-ghost {
+        background: transparent;
+        color: var(--cangxu-muted);
+      }
+      .cx-btn-ghost:hover { background: var(--cangxu-hover); color: var(--cangxu-foreground); }
+      .cx-btn-sm { height: 32px; padding: 0 12px; font-size: 13px; border-radius: var(--cangxu-radius-md); }
+      .cx-input-sm { height: 34px; padding: 8px 12px; font-size: 13px; }
+      .modal-backdrop {
+        position: fixed; inset: 0; background: rgba(45,55,72,0.4);
+        z-index: 50; display: flex; align-items: center; justify-content: center;
+        padding: 16px; backdrop-filter: blur(2px);
+      }
+      .modal-panel {
+        background: var(--cangxu-white); border-radius: var(--cangxu-radius-2xl);
+        box-shadow: var(--cangxu-shadow-float);
+        width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto;
+      }
+      .cx-tag-pink { background: var(--cangxu-pink-100); color: var(--cangxu-pink-500); }
+      .cx-tag-cream { background: var(--cangxu-cream-100); color: var(--cangxu-cream-600); }
+      .cx-tag-mint { background: var(--cangxu-mint-100); color: var(--cangxu-mint-600); }
+      .cx-tag-taro { background: var(--cangxu-taro-100); color: var(--cangxu-taro-600); }
+      .cx-tag-primary { background: var(--cangxu-primary-100); color: var(--cangxu-primary-700); }
+      .cx-tag-gray { background: var(--cangxu-input-bg); color: var(--cangxu-muted); }
+      .toast {
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+        background: var(--cangxu-foreground); color: white;
+        padding: 10px 20px; border-radius: var(--cangxu-radius-lg);
+        font-size: 14px; z-index: 100; box-shadow: var(--cangxu-shadow-float);
+        animation: toastIn 0.2s ease;
+      }
+      @keyframes toastIn {
+        from { opacity: 0; transform: translate(-50%, -10px); }
+        to { opacity: 1; transform: translate(-50%, 0); }
+      }
+      details > summary { list-style: none; cursor: pointer; }
+      details > summary::-webkit-details-marker { display: none; }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <div id="app"></div>
+    <script src="./cloud.js"></script>
+    <script src="./app.js"></script>
+</body>
+</html>
