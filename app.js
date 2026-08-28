@@ -396,7 +396,7 @@
                 <span class="hidden sm:inline">${cloudSyncState==='synced'?'已同步':cloudSyncState==='syncing'?'同步中':'同步失败'}</span>
               </div>
             ` : `
-              <button class="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center text-muted transition-colors" onclick="showCloudSetup()" title="开启云端同步">
+              <button class="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center text-muted transition-colors" onclick="showLogin()" title="云端同步">
                 <i data-lucide="cloud" class="w-5 h-5"></i>
               </button>
             `}
@@ -457,7 +457,12 @@
   // ==================== MODAL HELPER ====================
   function openModal(html, opts) {
     opts = opts || {};
-    const root = $('#modal-root');
+    let root = $('#modal-root');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'modal-root';
+      document.body.appendChild(root);
+    }
     root.innerHTML = `<div class="modal-backdrop" id="modal-backdrop" onclick="if(event.target===this)closeModal()">
       <div class="modal-panel" onclick="event.stopPropagation()">${html}</div>
     </div>`;
@@ -2669,7 +2674,7 @@
                 <p class="text-xs text-muted">登录后开启跨设备同步</p>
               </div>
             </div>
-            <button onclick="render();window.location.hash='/home'" class="cx-btn cx-btn-primary w-full">前往登录</button>
+            <button onclick="showLogin()" class="cx-btn cx-btn-primary w-full">前往登录</button>
             <button onclick="showCloudSetup()" class="cx-btn cx-btn-secondary w-full">修改配置</button>
           </div>
         ` : `
@@ -2880,8 +2885,18 @@
 
   window.useLocalMode = function () {
     cloudReady = true;
+    setData(KEYS.cloudMode, false);
     seedIfNeeded();
     window.location.hash = '/home';
+    render();
+  };
+
+  window.showLogin = function () {
+    if (!window.CloudSync || !window.CloudSync.isConfigured()) {
+      showCloudSetup();
+      return;
+    }
+    setData(KEYS.cloudMode, true);
     render();
   };
 
@@ -2965,17 +2980,40 @@
     const url = $('#cloud-url').value.trim();
     const key = $('#cloud-key').value.trim();
     if (!url || !key) { toast('请填写 URL 和 Key'); return; }
+
+    // Validate URL format
+    if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
+      toast('URL 格式不正确，应为 https://xxxx.supabase.co');
+      return;
+    }
+
     window.CloudSync.saveConfig(url, key);
-    window.CloudSync.initClient();
+    const client = window.CloudSync.initClient();
     closeModal();
-    toast('配置已保存');
+
+    if (!client) {
+      if (!window.supabase) {
+        toast('云端库加载失败，请检查网络连接后刷新页面重试');
+      } else {
+        toast('云端连接初始化失败，请检查 URL 和 Key 是否正确');
+      }
+      return;
+    }
+
+    toast('配置已保存，正在连接...');
     // Check session
     window.CloudSync.checkSession().then(user => {
       if (user) {
         afterLogin();
       } else {
+        // Not logged in yet - show login screen
+        setData(KEYS.cloudMode, true);
+        cloudReady = true;
         render();
       }
+    }).catch(err => {
+      console.error('Cloud connection error:', err);
+      toast('连接失败：' + (err.message || '请检查 URL 和 Key'));
     });
   };
 
