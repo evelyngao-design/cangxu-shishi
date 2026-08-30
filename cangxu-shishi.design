@@ -12,10 +12,10 @@
         "group": 0,
         "layoutSnapshot": {
           "version": 1,
-          "contentHeight": 1200,
+          "contentHeight": 900,
           "viewportWidth": 1440,
-          "sourceHash": "spa-v1",
-          "measuredAt": 1787677000000
+          "sourceHash": "fnv1a-567f34ad",
+          "measuredAt": 1788014998896
         }
       },
       "devMetadata": {
