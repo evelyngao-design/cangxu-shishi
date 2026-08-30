@@ -2708,10 +2708,15 @@
           <button onclick="exportData()" class="cx-btn cx-btn-secondary w-full">
             <i data-lucide="download" class="w-4 h-4 mr-1"></i> 导出数据
           </button>
+          <button onclick="document.getElementById('import-file').click()" class="cx-btn cx-btn-secondary w-full">
+            <i data-lucide="upload" class="w-4 h-4 mr-1"></i> 导入数据
+          </button>
+          <input type="file" id="import-file" accept="application/json,.json" class="hidden" onchange="importData(event)">
           <button onclick="clearAllData()" class="cx-btn cx-btn-destructive w-full">
             <i data-lucide="trash-2" class="w-4 h-4 mr-1"></i> 清除所有数据
           </button>
         </div>
+        <p class="text-xs text-muted mt-3 leading-relaxed">导入 JSON 文件会与当前数据合并（同一条目以导入文件为准）；登录状态下导入后会自动同步到云端。</p>
       </div>
     </div>
     `;
@@ -2752,6 +2757,71 @@
     a.href = url; a.download = 'cangxu-shishi-' + todayStr() + '.json';
     a.click(); URL.revokeObjectURL(url);
     toast('已导出');
+  };
+
+  // 合并两个数组：同 id 条目以导入文件为准，新条目追加
+  function mergeById(existing, incoming) {
+    if (!Array.isArray(incoming)) return existing;
+    const map = new Map(existing.map(item => [item.id, item]));
+    incoming.forEach(item => { if (item && item.id) map.set(item.id, item); });
+    return Array.from(map.values());
+  }
+
+  window.importData = function (event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      let imported;
+      try {
+        imported = JSON.parse(e.target.result);
+      } catch (err) {
+        toast('文件格式错误：请选择本应用导出的 JSON 文件');
+        return;
+      }
+      if (!imported || typeof imported !== 'object') {
+        toast('文件内容无效');
+        return;
+      }
+
+      const collections = [
+        ['products', getProducts, saveProducts],
+        ['orders', getOrders, saveOrders],
+        ['inventory', getInventory, saveInventory],
+        ['inventoryLogs', getInventoryLogs, saveInventoryLogs],
+        ['diet', getDiet, saveDiet],
+        ['body', getBody, saveBody],
+        ['unassigned', getUnassigned, saveUnassigned]
+      ];
+
+      let count = 0;
+      collections.forEach(([key, getter, setter]) => {
+        if (Array.isArray(imported[key])) {
+          const merged = mergeById(getter(), imported[key]);
+          setter(merged);
+          count += imported[key].length;
+        }
+      });
+
+      // 配置合并
+      if (imported.config && typeof imported.config === 'object') {
+        setConfig({ ...getConfig(), ...imported.config });
+      }
+
+      // 重置文件输入，允许重复导入同一文件
+      event.target.value = '';
+
+      toast(`导入完成，共处理 ${count} 条记录`);
+
+      // 登录状态下立即推送到云端
+      if (isCloudMode()) {
+        window.CloudSync.pushAll((k) => getData(KEYS[k], k === 'config' ? {} : []))
+          .then(() => toast('已同步到云端'))
+          .catch(() => toast('云端同步失败，可稍后在"我的"页点"立即同步"'));
+      }
+      render();
+    };
+    reader.readAsText(file);
   };
   window.clearAllData = function () {
     confirmDialog('清除所有数据', '此操作将删除所有记账、库存、饮食、体重数据，且不可恢复。确定吗？', () => {
