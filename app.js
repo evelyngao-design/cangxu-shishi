@@ -2639,8 +2639,102 @@
     render();
   };
 
+  const DIET_SOURCE_LABEL = { inventory: '库存', order: '外食', manual: '手动' };
+
+  // 铅笔图标：聚焦编辑这一条食物记录本身（不再打开三种录入方式）
   window.editDietItem = function (mealId, itemId, meal) {
-    openAddDietForm(meal, mealId, itemId);
+    openEditDietForm(mealId, itemId, meal);
+  };
+
+  function openEditDietForm(mealId, itemId, meal) {
+    const diet = getDiet();
+    const mealEntry = diet.find(m => m.id === mealId);
+    const item = mealEntry ? mealEntry.items.find(i => i.id === itemId) : null;
+    if (!item) { toast('未找到该记录'); return; }
+
+    const cfg = getConfig();
+    const srcLabel = DIET_SOURCE_LABEL[item.source] || '食物';
+
+    const html = `
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-lg font-semibold">编辑食物</h3>
+          <p class="text-xs text-muted mt-0.5">${MEAL_NAMES[meal] || ''} · 来源：${srcLabel}</p>
+        </div>
+        <button onclick="closeModal()" class="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center text-muted">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-muted block mb-1">食物名称</label>
+          <input type="text" id="de-name" class="cx-input w-full" value="${esc(item.name || '')}">
+        </div>
+        <div>
+          <label class="text-xs text-muted block mb-1">数量 / 份量</label>
+          <div class="flex gap-2">
+            <input type="text" id="de-qty" class="cx-input cx-input-sm flex-1" value="${esc(String(item.quantity ?? ''))}">
+            <input type="text" id="de-unit" class="cx-input cx-input-sm w-20" value="${esc(item.unit || '')}">
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-muted block mb-1">热量 (${cfg.energyUnit}) · 该项合计</label>
+          <input type="number" id="de-cal" step="1" min="0" class="cx-input w-full" value="${item.calories ?? ''}">
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <div>
+            <label class="text-xs text-muted block mb-1">蛋白质(g)</label>
+            <input type="number" id="de-pro" step="0.1" min="0" class="cx-input w-full" value="${item.protein ?? ''}">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">碳水(g)</label>
+            <input type="number" id="de-carb" step="0.1" min="0" class="cx-input w-full" value="${item.carbs ?? ''}">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">脂肪(g)</label>
+            <input type="number" id="de-fat" step="0.1" min="0" class="cx-input w-full" value="${item.fat ?? ''}">
+          </div>
+        </div>
+        <p class="text-[11px] text-muted">此处营养值为这一份记录的合计，保存后直接计入当日营养汇总；来源与库存关联保持不变。</p>
+        <button onclick="saveDietItemEdit('${mealId}','${itemId}')" class="cx-btn cx-btn-primary w-full">保存修改</button>
+      </div>
+    </div>`;
+    openModal(html);
+  }
+  window.openEditDietForm = openEditDietForm;
+
+  window.saveDietItemEdit = function (mealId, itemId) {
+    const name = $('#de-name').value.trim();
+    if (!name) { toast('请输入食物名称'); return; }
+    const qtyRaw = $('#de-qty').value.trim();
+    const unit = $('#de-unit').value.trim();
+    const cal = parseFloat($('#de-cal').value) || 0;
+    const pro = parseFloat($('#de-pro').value) || 0;
+    const carb = parseFloat($('#de-carb').value) || 0;
+    const fat = parseFloat($('#de-fat').value) || 0;
+    const qty = (qtyRaw !== '' && !isNaN(Number(qtyRaw))) ? Number(qtyRaw) : (qtyRaw || 1);
+
+    const diet = getDiet();
+    const mealEntry = diet.find(m => m.id === mealId);
+    if (!mealEntry) { closeModal(); return; }
+    const idx = mealEntry.items.findIndex(i => i.id === itemId);
+    if (idx < 0) { closeModal(); return; }
+
+    // 仅更新可编辑字段，保留 id、来源(source)、商品关联(productId)、品牌、库存/外食关联
+    const it = mealEntry.items[idx];
+    it.name = name;
+    it.quantity = qty;
+    it.unit = unit;
+    it.calories = cal;
+    it.protein = pro;
+    it.carbs = carb;
+    it.fat = fat;
+    mealEntry.totalCalories = mealEntry.items.reduce((s, i) => s + (i.calories || 0), 0);
+    saveDiet(diet);
+    closeModal();
+    toast('已更新');
+    render();
   };
 
   // ---------- PRODUCTS ----------
