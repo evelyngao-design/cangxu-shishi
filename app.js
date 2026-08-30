@@ -17,12 +17,14 @@
     recycle: 'cx_recycle',
     unassigned: 'cx_unassigned_food',
     seeded: 'cx_seeded_v1',
-    cloudMode: 'cx_cloud_mode'
+    cloudMode: 'cx_cloud_mode',
+    localOnly: 'cx_local_only'
   };
 
   // Cloud sync state
   let cloudReady = false;
   let cloudSyncState = 'idle';
+  let cloudSyncError = '';
   let cloudUserEmail = '';
 
   function isCloudMode() {
@@ -2652,14 +2654,20 @@
         <h3 class="text-base font-semibold mb-4">云端同步</h3>
         ${isCloudMode() ? `
           <div class="space-y-3">
-            <div class="flex items-center gap-3 p-3 rounded-xl bg-mint-100/50">
-              <i data-lucide="cloud" class="w-5 h-5 text-mint-600"></i>
+            <div class="flex items-center gap-3 p-3 rounded-xl ${cloudSyncState==='error'?'bg-error/15':'bg-mint-100/50'}">
+              <i data-lucide="${cloudSyncState==='error'?'cloud-alert':'cloud'}" class="w-5 h-5 ${cloudSyncState==='error'?'text-error-text':'text-mint-600'}"></i>
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-foreground">已连接云端</p>
                 <p class="text-xs text-muted truncate">${cloudUserEmail}</p>
               </div>
-              <span class="text-xs text-mint-600 font-medium">${cloudSyncState==='synced'?'已同步':cloudSyncState==='syncing'?'同步中':'离线'}</span>
+              <span class="text-xs font-medium ${cloudSyncState==='error'?'text-error-text':'text-mint-600'}">${cloudSyncState==='synced'?'已同步':cloudSyncState==='syncing'?'同步中':cloudSyncState==='error'?'同步失败':'离线'}</span>
             </div>
+            ${cloudSyncState==='error' && cloudSyncError ? `
+              <div class="p-3 rounded-xl bg-error/10 text-error-text text-xs leading-relaxed">
+                <p class="font-medium mb-1">同步失败原因：</p>
+                <p>${cloudSyncError}</p>
+              </div>
+            ` : ''}
             <button onclick="manualSync()" class="cx-btn cx-btn-secondary w-full">
               <i data-lucide="refresh-cw" class="w-4 h-4 mr-1"></i> 立即同步
             </button>
@@ -2841,8 +2849,8 @@
           </div>
         </div>
         <p class="text-center text-xs text-muted mt-4">
-          开启云端同步需要先配置 Supabase。<br>
-          <a href="javascript:void(0)" onclick="showCloudSetup()" class="text-primary hover:underline">配置云端连接</a>
+          云端已自动配置，登录后数据在手机与电脑间自动同步。<br>
+          <a href="javascript:void(0)" onclick="showCloudSetup()" class="text-primary hover:underline">高级：使用自定义云端配置</a>
         </p>
       </div>
     </div>`;
@@ -2857,8 +2865,29 @@
       await window.CloudSync.login(email, password);
       await afterLogin();
     } catch (e) {
-      errEl.textContent = e.message || '登录失败';
+      const msg = e.message || '登录失败';
+      if (/not confirmed|email_not_confirmed|confirm your email/i.test(msg)) {
+        errEl.className = 'mb-3 p-3 rounded-lg bg-warning/20 text-warning-text text-sm';
+        errEl.innerHTML = '邮箱尚未验证。请先点击验证邮件里的链接（即使最后页面打不开，验证也已生效）；找不到邮件可 <a href="#" onclick="resendConfirmEmail();return false;" class="underline font-medium">点此重新发送</a>。';
+      } else if (/invalid login|invalid credentials/i.test(msg)) {
+        errEl.className = 'mb-3 p-3 rounded-lg bg-error/20 text-error-text text-sm';
+        errEl.textContent = '邮箱或密码错误。如果还没注册，请点下方"注册新账号"。';
+      } else {
+        errEl.className = 'mb-3 p-3 rounded-lg bg-error/20 text-error-text text-sm';
+        errEl.textContent = msg;
+      }
       errEl.classList.remove('hidden');
+    }
+  };
+
+  window.resendConfirmEmail = async function () {
+    const email = $('#login-email').value.trim();
+    if (!email) { toast('请先在邮箱框中填写你的注册邮箱'); return; }
+    try {
+      await window.CloudSync.resendConfirm(email);
+      toast('验证邮件已重新发送，请查收（含垃圾邮件文件夹）');
+    } catch (e) {
+      toast('发送失败：' + (e.message || '请稍后再试'));
     }
   };
 
@@ -2872,7 +2901,7 @@
       const result = await window.CloudSync.signup(email, password);
       if (result.needsConfirm) {
         errEl.className = 'mb-3 p-3 rounded-lg bg-info/20 text-info-text text-sm';
-        errEl.textContent = '注册成功！请查收邮件验证后登录。';
+        errEl.innerHTML = '注册成功！验证邮件已发送，请点击邮件中的链接完成验证（<b>即使链接最后跳转到打不开的页面，验证也已生效</b>），然后回到这里点"登录"。';
         errEl.classList.remove('hidden');
       } else {
         await afterLogin();
@@ -2885,6 +2914,7 @@
 
   window.useLocalMode = function () {
     cloudReady = true;
+    setData(KEYS.localOnly, true);
     setData(KEYS.cloudMode, false);
     seedIfNeeded();
     window.location.hash = '/home';
@@ -2896,6 +2926,7 @@
       showCloudSetup();
       return;
     }
+    setData(KEYS.localOnly, false);
     setData(KEYS.cloudMode, true);
     render();
   };
@@ -2926,9 +2957,11 @@
         toast('已将本地数据上传到云端');
       }
     }
-    cloudSyncState = 'synced';
+    cloudSyncState = window.CloudSync.getSyncState();
+    cloudSyncError = window.CloudSync.getLastError?.() || '';
     cloudReady = true;
     setData(KEYS.cloudMode, true);
+    setData(KEYS.localOnly, false);
     window.location.hash = '/home';
     render();
   }
@@ -2957,7 +2990,9 @@
           <ol class="list-decimal list-inside space-y-0.5 text-xs">
             <li>前往 <a href="https://supabase.com" target="_blank" class="underline">supabase.com</a> 注册并创建项目</li>
             <li>在项目 SQL Editor 中运行 <code class="bg-white/50 px-1 rounded">supabase-setup.sql</code> 中的建表语句</li>
-            <li>在 Settings → API 中复制 Project URL 和 anon public key</li>
+            <li>点击左下角齿轮 <b>Settings</b> → <b>Data API</b>（旧版叫 API）</li>
+            <li>复制 <b>Project URL</b>（形如 https://abcd1234.supabase.co，<b>不要</b>复制浏览器地址栏里的链接）</li>
+            <li>同页面下方 <b>Project API keys</b> 里复制 <b>anon</b> / <b>public</b>  key（以 eyJ 或 sb_ 开头）</li>
           </ol>
         </div>
         <div class="space-y-3">
@@ -2977,15 +3012,29 @@
   };
 
   window.saveCloudConfig = function () {
-    const url = $('#cloud-url').value.trim();
+    let url = $('#cloud-url').value.trim();
     const key = $('#cloud-key').value.trim();
     if (!url || !key) { toast('请填写 URL 和 Key'); return; }
 
-    // Validate URL format
-    if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
-      toast('URL 格式不正确，应为 https://xxxx.supabase.co');
+    // Detect common mistakes
+    if (url.includes('supabase.com/dashboard') || url.includes('/project/')) {
+      toast('URL 填错了：这是后台管理地址。请到 Settings → Data API 页面复制 Project URL');
       return;
     }
+    // Must look like https://<ref>.supabase.co
+    const urlOk = /^https:\/\/[a-z0-9]{15,30}\.supabase\.co\/?(\/.*)?$/i.test(url);
+    if (!urlOk) {
+      toast('URL 格式不正确，应为 https://xxxxxxxx.supabase.co（不带斜杠和其他路径）');
+      return;
+    }
+    // Key sanity check (JWT starts with eyJ, new keys start with sb_)
+    if (!/^(eyJ|sb_)/.test(key)) {
+      toast('Key 似乎不对：anon key 应以 eyJ 或 sb_ 开头，请确认复制的是 anon/public key');
+      return;
+    }
+
+    // Normalize: strip trailing slash/path
+    url = url.match(/^(https:\/\/[a-z0-9]{15,30}\.supabase\.co)/i)[1];
 
     window.CloudSync.saveConfig(url, key);
     const client = window.CloudSync.initClient();
@@ -3013,7 +3062,12 @@
       }
     }).catch(err => {
       console.error('Cloud connection error:', err);
-      toast('连接失败：' + (err.message || '请检查 URL 和 Key'));
+      const msg = err.message || String(err);
+      if (msg.includes('Invalid path') || msg.includes('fetch')) {
+        toast('无法连接云端：请检查 Project URL 是否复制完整（应为 https://xxxx.supabase.co）');
+      } else {
+        toast('连接失败：' + msg);
+      }
     });
   };
 
@@ -3021,6 +3075,7 @@
     if (!confirm('确定断开云端连接？数据将只保存在本地。')) return;
     window.CloudSync.clearConfig();
     setData(KEYS.cloudMode, false);
+    setData(KEYS.localOnly, true);
     cloudUserEmail = '';
     cloudSyncState = 'idle';
     closeModal();
@@ -3030,17 +3085,20 @@
   window.manualSync = async function () {
     if (!isCloudMode()) return;
     cloudSyncState = 'syncing';
+    cloudSyncError = '';
     render();
     await window.CloudSync.pushAll((key) => getData(KEYS[key], key === 'config' ? {} : []));
-    cloudSyncState = 'synced';
-    toast('同步完成');
+    cloudSyncState = window.CloudSync.getSyncState();
+    cloudSyncError = window.CloudSync.getLastError?.() || '';
+    if (cloudSyncState === 'synced') toast('同步完成');
+    else toast('同步失败：' + (cloudSyncError || '请查看"我的-云端同步"中的提示'));
     render();
   };
 
   // ---------- MAIN RENDER ----------
   function render() {
-    // If cloud is configured but not logged in, show login screen
-    if (window.CloudSync && window.CloudSync.isConfigured() && !window.CloudSync.isLoggedIn() && getData(KEYS.cloudMode, false)) {
+    // 已配置云端但未登录时显示登录页（用户明确选择"仅本地使用"后跳过）
+    if (window.CloudSync && window.CloudSync.isConfigured() && !window.CloudSync.isLoggedIn() && !getData(KEYS.localOnly, false)) {
       $('#app').innerHTML = renderLoginScreen();
       lucide.createIcons();
       return;
@@ -3069,8 +3127,9 @@
     // Setup cloud
     if (window.CloudSync) {
       window.CloudSync.initClient();
-      window._onSyncChange = (state) => {
+      window._onSyncChange = (state, errMsg) => {
         cloudSyncState = state;
+        cloudSyncError = errMsg || (state === 'error' ? (window.CloudSync.getLastError?.() || '同步失败') : '');
         // Don't re-render full page, just update indicator if possible
         const indicator = document.querySelector('[data-sync-indicator]');
         if (indicator) render(); // simple approach

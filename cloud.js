@@ -9,6 +9,11 @@
     key: 'cx_supabase_key'
   };
 
+  // 内置云端配置（anon key 本身就是设计给前端公开使用的，数据安全由登录账号 + RLS 策略保证）
+  // 任何设备打开网页都会自动使用此配置，直接进入登录界面；用户手动填写的配置会覆盖内置值。
+  const BUILTIN_URL = 'https://yfofcakxhseivibgocyo.supabase.co';
+  const BUILTIN_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlmb2ZjYWt4aHNlaXZpYmdvY3lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5MjcxNTYsImV4cCI6MjEwMzUwMzE1Nn0.bU1ThWYiJhCkp6-cIDS-vMeoHSC6hYuhlh41Se6sWsE';
+
   const TABLE_MAP = {
     products: 'products',
     orders: 'orders',
@@ -22,9 +27,43 @@
   let supabaseClient = null;
   let currentUser = null;
   let syncState = 'idle'; // idle | syncing | error | synced
+  let lastError = '';
 
-  function getUrl() { return localStorage.getItem(CLOUD_KEYS.url) || ''; }
-  function getKey() { return localStorage.getItem(CLOUD_KEYS.key) || ''; }
+  // Translate common Supabase errors into beginner-friendly Chinese
+  function friendlyError(e) {
+    const raw = (e && (e.message || e.error_description || String(e))) || '未知错误';
+    let hint = '';
+    if (/relation .* does not exist|42P01/i.test(raw)) {
+      hint = '数据库还没有建表：请在 Supabase 后台打开 SQL Editor，把 supabase-setup.sql 的全部内容粘贴进去并点击 RUN 运行。';
+    } else if (/permission denied for (table|sequence|relation)/i.test(raw)) {
+      hint = '数据库表权限缺失：请重新在 SQL Editor 中完整运行最新版 supabase-setup.sql（新版包含 grant 授权语句），运行后必须看到 Success。';
+    } else if (/permission denied|row-level security|42501|new row violates row-level security/i.test(raw)) {
+      hint = '数据库权限策略缺失：请重新在 SQL Editor 中完整运行一次最新版 supabase-setup.sql（包含 drop policy 和 create policy 部分），运行后必须看到 Success。';
+    } else if (/JWT|jwt|invalid api key|invalid token/i.test(raw)) {
+      hint = 'API Key 不正确：请确认复制的是 anon / public key（不是 service_role key）。';
+    } else if (/Failed to fetch|NetworkError|network|load failed/i.test(raw)) {
+      hint = '网络连接失败：请检查网络，或确认 Project URL 填写正确（应为 https://xxxx.supabase.co）。';
+    } else if (/Could not find the|column .* does not exist|PGRST204/i.test(raw)) {
+      hint = '数据表结构过旧：请重新运行最新版 supabase-setup.sql 后再试。';
+    }
+    return hint ? hint + '（详细信息：' + raw + '）' : raw;
+  }
+
+  function sanitizeUrl(u) {
+    u = (u || '').trim();
+    // Extract the canonical API URL: https://<ref>.supabase.co
+    // This strips trailing slashes, accidental paths (e.g. /auth/v1),
+    // and dashboard URLs pasted by mistake.
+    const m = u.match(/^(https:\/\/[a-z0-9]{15,30}\.supabase\.co)/i);
+    if (m) return m[1];
+    // Fallback: just strip trailing slashes/spaces
+    return u.replace(/\/+$/, '');
+  }
+
+  function getUrl() { return sanitizeUrl(localStorage.getItem(CLOUD_KEYS.url) || BUILTIN_URL || ''); }
+  function getKey() { return (localStorage.getItem(CLOUD_KEYS.key) || BUILTIN_KEY || '').trim(); }
+  // 用户是否手动填写过配置（覆盖内置配置）
+  function hasUserConfig() { return !!(localStorage.getItem(CLOUD_KEYS.url) && localStorage.getItem(CLOUD_KEYS.key)); }
 
   function isConfigured() {
     return !!(getUrl() && getKey() && window.supabase);
@@ -79,7 +118,14 @@
   async function signup(email, password) {
     const client = initClient();
     if (!client) throw new Error('云端未配置');
-    const { data, error } = await client.auth.signUp({ email, password });
+    // Redirect back to the current site after email confirmation
+    const signUpOpts = { email, password };
+    if (window.location.origin && /^https?:/.test(window.location.origin)) {
+      signUpOpts.options = {
+        emailRedirectTo: window.location.origin + window.location.pathname
+      };
+    }
+    const { data, error } = await client.auth.signUp(signUpOpts);
     if (error) throw error;
     if (data.user && !data.session) {
       return { needsConfirm: true, user: data.user };
@@ -93,6 +139,17 @@
     if (!client) return;
     await client.auth.signOut();
     currentUser = null;
+  }
+
+  async function resendConfirm(email) {
+    const client = initClient();
+    if (!client) throw new Error('云端未配置');
+    const opts = { email, type: 'signup' };
+    if (window.location.origin && /^https?:/.test(window.location.origin)) {
+      opts.options = { emailRedirectTo: window.location.origin + window.location.pathname };
+    }
+    const { error } = await client.auth.resend(opts);
+    if (error) throw error;
   }
 
   function getUser() { return currentUser; }
@@ -171,7 +228,9 @@
       }
     } catch (e) {
       console.error(`Push ${tableName} failed:`, e);
-      throw e;
+      const wrapped = new Error(`[表:${tableName}] ${e.message || e.error_description || e}`);
+      wrapped.cause = e;
+      throw wrapped;
     }
   }
 
@@ -208,11 +267,13 @@
       }
 
       syncState = 'synced';
+      lastError = '';
     } catch (e) {
       syncState = 'error';
+      lastError = friendlyError(e);
       console.error('Push all failed:', e);
     }
-    if (window._onSyncChange) window._onSyncChange(syncState);
+    if (window._onSyncChange) window._onSyncChange(syncState, lastError);
   }
 
   // Pull all data from cloud to local
@@ -238,7 +299,7 @@
 
       for (const [localKey, tableName] of tables) {
         const { data, error } = await supabaseClient.from(tableName).select('*').eq('user_id', userId);
-        if (error) throw error;
+        if (error) throw new Error(`[表:${tableName}] ${error.message || error}`);
 
         result[localKey] = (data || []).map(rec => {
           const item = { ...rec };
@@ -289,11 +350,13 @@
       result.recycle = [];
 
       syncState = 'synced';
-      if (window._onSyncChange) window._onSyncChange(syncState);
+      lastError = '';
+      if (window._onSyncChange) window._onSyncChange(syncState, lastError);
       return result;
     } catch (e) {
       syncState = 'error';
-      if (window._onSyncChange) window._onSyncChange(syncState);
+      lastError = friendlyError(e);
+      if (window._onSyncChange) window._onSyncChange(syncState, lastError);
       console.error('Pull all failed:', e);
       return null;
     }
@@ -327,9 +390,9 @@
     initClient,
     checkSession,
     onAuthChange,
-    login, signup, logout,
+    login, signup, logout, resendConfirm,
     getUser, isLoggedIn, getUserId,
-    getSyncState,
+    getSyncState, getLastError: () => lastError,
     pushAll, pullAll, pushTable,
     schedulePush,
     saveConfig, clearConfig,
