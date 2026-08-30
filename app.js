@@ -65,6 +65,19 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
+  // 取最新一条体重记录：日期最新优先；同一天内取最后录入的那条（数组中靠后的）
+  function latestBodyRecord(body) {
+    if (!Array.isArray(body) || body.length === 0) return null;
+    let best = null, bestIdx = -1;
+    body.forEach((item, idx) => {
+      if (!best || (item.date || '') > (best.date || '') ||
+          ((item.date || '') === (best.date || '') && idx > bestIdx)) {
+        best = item; bestIdx = idx;
+      }
+    });
+    return best;
+  }
+
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
 
@@ -519,7 +532,7 @@
     const todaySpending = todayOrders.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
     const todayDiet = diet.filter(d => d.date === today);
     const todayCalories = todayDiet.reduce((s, m) => s + (m.totalCalories || 0), 0);
-    const latestBody = body.sort((a,b) => b.date.localeCompare(a.date))[0];
+    const latestBody = latestBodyRecord(body);
 
     const now = new Date(); now.setHours(0,0,0,0);
     const expiringCount = inventory.filter(i => {
@@ -2598,7 +2611,7 @@
   function renderProfile() {
     const cfg = getConfig();
     const body = getBody();
-    const latestBody = [...body].sort((a,b) => b.date.localeCompare(a.date))[0];
+    const latestBody = latestBodyRecord(body);
     return `
     <div class="space-y-5">
       <div class="cx-card p-5">
@@ -3001,6 +3014,19 @@
     render();
   };
 
+  // 云端数据按 id 合并进本地：同 id 以云端为准，本地独有条目保留（防止尚未推送的记录丢失）
+  function mergeCloudData(cloudData) {
+    const arrayKeys = ['products', 'orders', 'inventory', 'inventoryLogs', 'diet', 'body', 'unassigned'];
+    arrayKeys.forEach(k => {
+      if (Array.isArray(cloudData[k]) && cloudData[k].length) {
+        setData(KEYS[k], mergeById(getData(KEYS[k], []), cloudData[k]));
+      }
+    });
+    if (cloudData.config && typeof cloudData.config === 'object') {
+      setData(KEYS.config, { ...DEFAULT_CONFIG, ...getData(KEYS.config, {}), ...cloudData.config });
+    }
+  }
+
   async function afterLogin() {
     const user = window.CloudSync.getUser();
     cloudUserEmail = user?.email || '';
@@ -3011,15 +3037,8 @@
       // Check if cloud has data
       const hasCloudData = Object.values(cloudData).some(v => Array.isArray(v) ? v.length > 0 : (v && Object.keys(v).length > 0));
       if (hasCloudData) {
-        // Merge: cloud data takes precedence, but merge with local if local has items not in cloud
-        if (cloudData.products?.length) setData(KEYS.products, cloudData.products);
-        if (cloudData.orders?.length) setData(KEYS.orders, cloudData.orders);
-        if (cloudData.inventory?.length) setData(KEYS.inventory, cloudData.inventory);
-        if (cloudData.inventoryLogs?.length) setData(KEYS.inventoryLogs, cloudData.inventoryLogs);
-        if (cloudData.diet?.length) setData(KEYS.diet, cloudData.diet);
-        if (cloudData.body?.length) setData(KEYS.body, cloudData.body);
-        if (cloudData.unassigned?.length) setData(KEYS.unassigned, cloudData.unassigned);
-        if (cloudData.config) setData(KEYS.config, { ...DEFAULT_CONFIG, ...cloudData.config });
+        // 按 id 合并：云端同 id 条目为准，本地独有条目（尚未推送）保留，防止数据丢失
+        mergeCloudData(cloudData);
         toast('已从云端同步数据');
       } else {
         // No cloud data yet, push local data up
@@ -3217,14 +3236,8 @@
           if (cloudData) {
             const hasCloudData = Object.values(cloudData).some(v => Array.isArray(v) ? v.length > 0 : (v && Object.keys(v).length > 0));
             if (hasCloudData) {
-              if (cloudData.products?.length) setData(KEYS.products, cloudData.products);
-              if (cloudData.orders?.length) setData(KEYS.orders, cloudData.orders);
-              if (cloudData.inventory?.length) setData(KEYS.inventory, cloudData.inventory);
-              if (cloudData.inventoryLogs?.length) setData(KEYS.inventoryLogs, cloudData.inventoryLogs);
-              if (cloudData.diet?.length) setData(KEYS.diet, cloudData.diet);
-              if (cloudData.body?.length) setData(KEYS.body, cloudData.body);
-              if (cloudData.unassigned?.length) setData(KEYS.unassigned, cloudData.unassigned);
-              if (cloudData.config) setData(KEYS.config, { ...DEFAULT_CONFIG, ...cloudData.config });
+              // 按 id 合并，避免覆盖本地尚未推送的记录
+              mergeCloudData(cloudData);
             }
           }
         }

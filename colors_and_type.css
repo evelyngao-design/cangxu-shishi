@@ -210,3 +210,36 @@ h1, h2, h3, h4, h5, h6 {
   font-size: 12px;
   font-weight: 500;
 }
+
+/* Toast 轻提示 */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%) translateY(12px);
+  background: var(--cangxu-foreground);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: var(--cangxu-radius-full);
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: var(--cangxu-shadow-float);
+  z-index: 9999;
+  opacity: 0;
+  animation: cx-toast-in 0.25s ease forwards, cx-toast-out 0.3s ease 1.7s forwards;
+  max-width: 90vw;
+  text-align: center;
+  pointer-events: none;
+}
+
+@keyframes cx-toast-in {
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes cx-toast-out {
+  to { opacity: 0; transform: translateX(-50%) translateY(8px); }
+}
+
+@media (min-width: 768px) {
+  .toast { bottom: 32px; }
+}
