@@ -173,6 +173,9 @@
       // Map local data to cloud format
       const records = data.map(item => {
         const rec = { ...item, user_id: userId };
+        // 本地时间戳字段不入库（数据库用 created_at/updated_at 自动生成）
+        delete rec.createdAt;
+        delete rec.updatedAt;
         // Convert field names to match DB schema
         if (tableName === 'body_data') {
           // body -> body_data: weight, bodyFat -> body_fat
