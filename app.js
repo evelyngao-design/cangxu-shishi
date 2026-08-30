@@ -44,7 +44,7 @@
     payments: ['现金', '支付宝HK', '微信支付HK', '信用卡', '八达通', 'PayMe', 'FPS转数快', '其他'],
     locations: ['冰箱冷藏', '冰箱冷冻', '储物柜', '厨房台面', '浴室', '卧室', '其他'],
     categories: ['蛋奶', '肉类', '蔬果', '粮油调味', '零食饮料', '日用品', '冷冻食品', '其他'],
-    units: ['g', 'kg', 'ml', 'L', '个', '包', '盒', '磅', '斤', '两'],
+    units: ['个', 'g', 'ml', '包', '盒', '瓶'],
     language: 'zh-CN',
     energyUnit: 'kcal',
     weightUnit: 'kg',
@@ -126,6 +126,24 @@
     const cur = currency || getConfig().defaultCurrency || 'HKD';
     const sym = cur === 'CNY' ? '¥' : 'HK$';
     return sym + parseFloat(amount || 0).toFixed(2);
+  }
+
+  // 单位成本自适应精度（小价格保留更多小数）
+  function moneyNum(v) {
+    v = parseFloat(v) || 0;
+    if (v >= 1) return v.toFixed(2);
+    if (v >= 0.1) return v.toFixed(3);
+    return v.toFixed(4);
+  }
+  // 库存均价：按单位显示，g/ml 额外折算每斤/每升便于核对
+  function formatAvgCost(cost, unit, currency) {
+    if (!cost || cost <= 0) return '—';
+    const cur = currency || getConfig().defaultCurrency || 'HKD';
+    const sym = cur === 'CNY' ? '¥' : 'HK$';
+    let s = sym + moneyNum(cost) + '/' + unit;
+    if (unit === 'g') s += `（约${sym}${(cost * 500).toFixed(2)}/斤）`;
+    else if (unit === 'ml') s += `（约${sym}${(cost * 1000).toFixed(2)}/L）`;
+    return s;
   }
 
   function formatWeight(kg) {
@@ -287,11 +305,11 @@
     saveInventoryLogs(logs);
   }
 
-  function mergeIntoInventory(productRef, quantity, unit, expiry, location, sourceOrderId, unitPrice, brand) {
+  function mergeIntoInventory(productRef, quantity, unit, expiry, location, sourceOrderId, unitPrice, brand, categoryOverride) {
     const inv = getInventory();
     const name = productRef.name;
     const prodBrand = brand || productRef.brand || '';
-    const category = productRef.category || '其他';
+    const category = categoryOverride || productRef.category || '其他';
 
     let existing = inv.find(i => i.productName === name && i.unit === unit);
     if (existing) {
@@ -299,6 +317,7 @@
       const newTotal = (unitPrice || 0) * quantity;
       existing.quantity += quantity;
       existing.avgCost = existing.quantity > 0 ? (oldTotal + newTotal) / existing.quantity : 0;
+      if (categoryOverride) existing.category = category;
       if (expiry && (!existing.expiry || new Date(expiry) < new Date(existing.expiry))) {
         existing.expiry = expiry;
       }
@@ -967,6 +986,9 @@
 
   function orderItemRow(it, idx, products, cfg) {
     const autoSubtotal = (parseFloat(it.unitPrice)||0) * (parseFloat(it.quantity)||0);
+    const effSubtotal = parseFloat(it.subtotal != null ? it.subtotal : autoSubtotal) || 0;
+    const effQty = parseFloat(it.quantity) || 0;
+    const unitCost = (it.toInventory && effQty > 0 && effSubtotal > 0) ? effSubtotal / effQty : 0;
     return `
     <div class="p-3 bg-muted/50 rounded-xl space-y-2" data-idx="${idx}">
       <div class="flex gap-2">
@@ -1001,11 +1023,16 @@
       </div>
       <div class="flex items-center gap-2">
         <div class="flex-1">
-          <label class="text-[11px] text-muted block mb-0.5">小计 ${it.subtotalEdited ? '<span class="text-primary" style="font-size:10px">(手动修改)</span>' : ''}</label>
+          <label class="text-[11px] text-muted block mb-0.5">小计（这件商品实付金额）${it.subtotalEdited ? '<span class="text-primary" style="font-size:10px">(手动修改)</span>' : ''}</label>
           <input type="number" step="0.01" min="0" name="item_subtotal_${idx}" value="${(it.subtotal != null ? it.subtotal : autoSubtotal)}"
             class="cx-input cx-input-sm w-full" oninput="updateOrderItemSubtotal(${idx},parseFloat(this.value)||0)">
         </div>
       </div>
+      ${it.toInventory ? `
+      <div id="unitcost-hint-${idx}" class="text-[11px] text-mint-600 flex items-center gap-1 ${unitCost > 0 ? '' : 'hidden'}">
+        <i data-lucide="info" class="w-3 h-3"></i>
+        <span>${unitCost > 0 ? `库存折合成本：${formatAvgCost(unitCost, it.unit, getConfig().defaultCurrency)}` : ''}</span>
+      </div>` : ''}
       <div class="flex flex-wrap gap-3 text-xs">
         <label class="flex items-center gap-1.5 cursor-pointer">
           <input type="checkbox" ${it.toInventory?'checked':''} onchange="updateOrderItem(${idx},'toInventory',this.checked);window._orderRefresh()">
@@ -1029,6 +1056,26 @@
             ${cfg.locations.map(l => `<option value="${esc(l)}" ${it.location===l?'selected':''}>${esc(l)}</option>`).join('')}
           </select>
         </div>
+        <div class="col-span-2">
+          <label class="text-[11px] text-muted block mb-0.5">库存分类（可选，留空用商品默认）</label>
+          <select name="item_invcat_${idx}" class="cx-input cx-input-sm w-full" onchange="updateOrderItem(${idx},'invCategory',this.value)">
+            <option value="" ${!it.invCategory?'selected':''}>用商品默认分类</option>
+            ${cfg.categories.map(c => `<option value="${esc(c)}" ${it.invCategory===c?'selected':''}>${esc(c)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="pt-1">
+        <label class="text-[11px] text-muted block mb-0.5">营养成分（每 100g，可选，留空不填）</label>
+        <div class="grid grid-cols-4 gap-2">
+          <input type="number" step="0.1" min="0" name="item_invcal_${idx}" value="${it.invCalories!=null?it.invCalories:''}" placeholder="热量kcal"
+            class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'invCalories',this.value)">
+          <input type="number" step="0.1" min="0" name="item_invpro_${idx}" value="${it.invProtein!=null?it.invProtein:''}" placeholder="蛋白g"
+            class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'invProtein',this.value)">
+          <input type="number" step="0.1" min="0" name="item_invcarb_${idx}" value="${it.invCarbs!=null?it.invCarbs:''}" placeholder="碳水g"
+            class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'invCarbs',this.value)">
+          <input type="number" step="0.1" min="0" name="item_invfat_${idx}" value="${it.invFat!=null?it.invFat:''}" placeholder="脂肪g"
+            class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'invFat',this.value)">
+        </div>
       </div>` : ''}
       ${it.toDiet ? `
       <div class="pt-1">
@@ -1040,6 +1087,19 @@
       </div>` : ''}
     </div>
     `;
+  }
+
+  function refreshUnitCostHint(idx) {
+    const data = window._orderData;
+    const el = document.getElementById('unitcost-hint-' + idx);
+    if (!data || !data.items[idx] || !el) return;
+    const it = data.items[idx];
+    const sub = parseFloat(it.subtotal) || 0;
+    const qty = parseFloat(it.quantity) || 0;
+    const cost = qty > 0 && sub > 0 ? sub / qty : 0;
+    el.classList.toggle('hidden', !(it.toInventory && cost > 0));
+    const span = el.querySelector('span');
+    if (span) span.textContent = cost > 0 ? `库存折合成本：${formatAvgCost(cost, it.unit, data.currency)}` : '';
   }
 
   window.updateOrderItem = function (idx, field, val) {
@@ -1069,6 +1129,7 @@
     const total = calcTotal ? calcTotal() : data.items.reduce((s, it) => s + (parseFloat(it.subtotal)||0), 0);
     const totEl = $('#order-total');
     if (totEl) totEl.textContent = formatMoney(total, data.currency);
+    refreshUnitCostHint(idx);
   };
 
   window.updateOrderItemSubtotal = function (idx, val) {
@@ -1080,6 +1141,7 @@
     const total = calcTotal ? calcTotal() : data.items.reduce((s, it) => s + (parseFloat(it.subtotal)||0), 0);
     const totEl = $('#order-total');
     if (totEl) totEl.textContent = formatMoney(total, data.currency);
+    refreshUnitCostHint(idx);
     const subInput = document.querySelector(`input[name="item_subtotal_${idx}"]`);
     if (subInput) {
       const labelEl = subInput.closest('div').querySelector('label');
@@ -1174,15 +1236,25 @@
     data.items.forEach(it => {
       let p = findProductByName(it.productName);
       if (!p) {
-        p = { id: uid(), name: it.productName, brand: it.brand || '', category: '其他', unit: it.unit, defaultPrice: it.unitPrice, calories: 0, protein: 0, carbs: 0, fat: 0, stockThreshold: 0 };
+        p = { id: uid(), name: it.productName, brand: it.brand || '', category: it.invCategory || '其他', unit: it.unit, defaultPrice: it.unitPrice, calories: parseFloat(it.invCalories)||0, protein: parseFloat(it.invProtein)||0, carbs: parseFloat(it.invCarbs)||0, fat: parseFloat(it.invFat)||0, stockThreshold: 0 };
         products.push(p);
         productsChanged = true;
-      } else if (!it.productId) {
-        it.productId = p.id;
+      } else {
+        // 补全商品档案：本次录入的库存分类/营养写入已有商品
+        if (it.invCategory) { p.category = it.invCategory; productsChanged = true; }
+        if (parseFloat(it.invCalories)>0) { p.calories = parseFloat(it.invCalories); productsChanged = true; }
+        if (parseFloat(it.invProtein)>0) { p.protein = parseFloat(it.invProtein); productsChanged = true; }
+        if (parseFloat(it.invCarbs)>0) { p.carbs = parseFloat(it.invCarbs); productsChanged = true; }
+        if (parseFloat(it.invFat)>0) { p.fat = parseFloat(it.invFat); productsChanged = true; }
+        if (!it.productId) it.productId = p.id;
       }
 
       if (it.toInventory) {
-        mergeIntoInventory(p, it.quantity, it.unit, it.expiry || null, it.location || '其他', data.id, it.unitPrice, it.brand);
+        // 库存成本 = 这件商品实付小计 ÷ 入库数量（按库存追踪单位折合）
+        const qty = parseFloat(it.quantity) || 0;
+        const sub = parseFloat(it.subtotal) || 0;
+        const unitCost = qty > 0 ? sub / qty : 0;
+        mergeIntoInventory(p, it.quantity, it.unit, it.expiry || null, it.location || '其他', data.id, unitCost, it.brand, it.invCategory || p.category);
       }
 
       if (it.toDiet) {
@@ -1450,7 +1522,7 @@
           <i data-lucide="map-pin" class="w-3 h-3"></i> ${esc(i.location)}
         </span>
       </div>
-      ${i.avgCost ? `<div class="text-xs text-muted mt-1">均价 ${formatMoney(i.avgCost)}/${esc(i.unit)}</div>` : ''}
+      ${i.avgCost ? `<div class="text-xs text-muted mt-1">均价 ${formatAvgCost(i.avgCost, i.unit)}</div>` : ''}
     </div>
     `;
   }
@@ -1490,7 +1562,7 @@
             <span class="text-muted text-sm">存放位置</span><span class="text-sm">${esc(inv.location)}</span>
           </div>
           <div class="flex justify-between py-2 border-b border-border/50">
-            <span class="text-muted text-sm">平均成本</span><span class="text-sm">${inv.avgCost ? formatMoney(inv.avgCost) + '/' + esc(inv.unit) : '-'}</span>
+            <span class="text-muted text-sm">平均成本</span><span class="text-sm">${inv.avgCost ? formatAvgCost(inv.avgCost, inv.unit) : '-'}</span>
           </div>
           ${p ? `
           <div class="flex justify-between py-2 border-b border-border/50">
@@ -1729,7 +1801,7 @@
             </div>
           </div>
           <div>
-            <label class="text-xs text-muted block mb-1">单价 (可选)</label>
+            <label class="text-xs text-muted block mb-1">单位成本（每个/每单位的价格，可选）</label>
             <input type="number" id="mi-price" step="0.01" min="0" value="0" class="cx-input w-full">
           </div>
           <div class="flex gap-3 justify-end pt-2">
@@ -2645,6 +2717,29 @@
       </div>
 
       <div class="cx-card p-5">
+        <h3 class="text-base font-semibold mb-4">字典管理</h3>
+        <p class="text-xs text-muted mb-3 leading-relaxed">自定义记账和库存里的下拉选项，添加后全局生效。</p>
+        <div class="space-y-2">
+          ${[
+            ['channels','购买渠道','shopping-bag'],
+            ['payments','支付方式','credit-card'],
+            ['locations','存放位置','map-pin'],
+            ['categories','商品分类','tag'],
+            ['units','计量单位','ruler']
+          ].map(([key,label,icon]) => `
+            <button onclick="openDictManager('${key}')" class="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors">
+              <span class="flex items-center gap-2 text-sm">
+                <i data-lucide="${icon}" class="w-4 h-4 text-primary"></i>
+                <span class="font-medium">${label}</span>
+                <span class="text-xs text-muted">${(cfg[key]||[]).length} 项</span>
+              </span>
+              <i data-lucide="chevron-right" class="w-4 h-4 text-muted"></i>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="cx-card p-5">
         <h3 class="text-base font-semibold mb-4">体重记录</h3>
         ${latestBody ? `
         <div class="flex items-center gap-4 mb-4">
@@ -2741,6 +2836,77 @@
     setConfig(cfg);
     render();
   };
+
+  // ---------- 字典管理 ----------
+  const DICT_META = {
+    channels:   { title: '购买渠道', placeholder: '如：惠康、宜家、Market Place' },
+    payments:   { title: '支付方式', placeholder: '如：支付宝HK、八达通' },
+    locations:  { title: '存放位置', placeholder: '如：冰箱冷藏、储物柜' },
+    categories: { title: '商品分类', placeholder: '如：零食饮料、日用品' },
+    units:      { title: '计量单位', placeholder: '如：片、袋、罐、瓶' }
+  };
+
+  window.openDictManager = function (type) {
+    const meta = DICT_META[type];
+    if (!meta) return;
+    const cfg = getConfig();
+    const list = Array.isArray(cfg[type]) ? cfg[type] : [];
+    openModal(`
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-5">
+          <h3 class="text-lg font-semibold text-foreground">${meta.title}</h3>
+          <button onclick="closeModal()" class="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center text-muted">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <div class="flex gap-2 mb-4">
+          <input type="text" id="dict-new" class="cx-input flex-1" placeholder="${meta.placeholder}"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();addDictItem('${type}');}">
+          <button type="button" onclick="addDictItem('${type}')" class="cx-btn cx-btn-primary flex-shrink-0">
+            <i data-lucide="plus" class="w-4 h-4"></i> 添加
+          </button>
+        </div>
+        <div class="space-y-1.5 max-h-80 overflow-y-auto">
+          ${list.length === 0 ? '<p class="text-sm text-muted text-center py-6">暂无选项，在上方添加</p>' :
+            list.map((item, idx) => `
+              <div class="flex items-center justify-between p-2.5 rounded-lg bg-muted/50">
+                <span class="text-sm">${esc(item)}</span>
+                <button onclick="removeDictItem('${type}',${idx})" class="w-7 h-7 rounded-lg hover:bg-error/20 text-muted hover:text-error-text flex items-center justify-center flex-shrink-0">
+                  <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+              </div>
+            `).join('')}
+        </div>
+      </div>
+    `);
+    setTimeout(() => $('#dict-new')?.focus(), 50);
+  };
+
+  window.addDictItem = function (type) {
+    const input = $('#dict-new');
+    const val = (input?.value || '').trim();
+    if (!val) return;
+    const cfg = getConfig();
+    if (!Array.isArray(cfg[type])) cfg[type] = [];
+    if (cfg[type].some(x => x === val)) { toast('该选项已存在'); return; }
+    cfg[type].push(val);
+    setConfig(cfg);
+    window.openDictManager(type);
+    toast('已添加');
+  };
+
+  window.removeDictItem = function (type, idx) {
+    const cfg = getConfig();
+    if (!Array.isArray(cfg[type])) return;
+    const removed = cfg[type][idx];
+    confirmDialog('删除选项', `确定删除「${removed}」吗？\n已使用该选项的历史记录不会受影响。`, () => {
+      cfg[type].splice(idx, 1);
+      setConfig(cfg);
+      window.openDictManager(type);
+      render();
+    });
+  };
+
   window.setCurrency = function (cur) {
     const cfg = getConfig();
     cfg.defaultCurrency = cur;
