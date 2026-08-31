@@ -200,6 +200,8 @@
           // items and tags are already JSON；支出单类型与分类需要独立列
           rec.kind = item.kind === 'expense' ? 'expense' : 'grocery';
           rec.expense_category = item.expenseCategory || '';
+          // 删掉驼峰键，避免把不存在的列 expenseCategory 发给 PostgREST
+          delete rec.expenseCategory;
         }
         if (tableName === 'diet') {
           // items is JSON, totalCalories -> total_calories
