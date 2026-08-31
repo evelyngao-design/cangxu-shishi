@@ -404,7 +404,7 @@
           <span class="font-semibold text-lg text-foreground">仓序食时</span>
         </div>
         <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
-          ${['home','bookkeeping','inventory','diet','products','recycle','profile'].map(r => {
+          ${['home','bookkeeping','inventory','diet','profile'].map(r => {
             const m = ROUTE_META[r];
             const active = r === activeRoute;
             return `<a href="#/${r}" class="flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${active ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'}">
@@ -467,7 +467,7 @@
               <i data-lucide="x" class="w-5 h-5"></i>
             </button>
           </div>
-          ${['home','bookkeeping','inventory','diet','products','recycle','profile'].map(r => {
+          ${['home','bookkeeping','inventory','diet','profile'].map(r => {
             const m = ROUTE_META[r];
             const active = r === activeRoute;
             return `<a href="#/${r}" onclick="toggleMobileMenu()" class="flex items-center gap-3 px-4 py-3 rounded-xl ${active ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'}">
@@ -545,7 +545,6 @@
     const diet = getDiet();
     const body = getBody();
     const today = todayStr();
-    const unassignedPool = getUnassigned();
 
     const todayOrders = orders.filter(o => o.date === today);
     const todaySpending = todayOrders.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
@@ -563,7 +562,7 @@
       const thr = p ? p.stockThreshold : null;
       return thr != null && i.quantity <= thr;
     }).length;
-    const unassignedDiet = unassignedPool.length;
+    const todayMealCount = todayDiet.length;
 
     const recentOrders = [...orders].sort((a,b) => (b.createdAt||b.date).localeCompare(a.createdAt||a.date)).slice(0, 5);
     const recentDiet = [...diet].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
@@ -630,13 +629,13 @@
           </div>
           <i data-lucide="chevron-right" class="w-5 h-5 text-muted flex-shrink-0"></i>
         </a>
-        <a href="#/diet" class="cx-card p-4 flex items-center gap-4 hover:shadow-lg transition-shadow ${unassignedDiet === 0 ? 'opacity-60' : ''}">
-          <div class="w-10 h-10 rounded-xl bg-info/20 text-info-text flex items-center justify-center">
-            <i data-lucide="coffee" class="w-5 h-5"></i>
+        <a href="#/diet" class="cx-card p-4 flex items-center gap-4 hover:shadow-lg transition-shadow">
+          <div class="w-10 h-10 rounded-xl bg-mint-100 text-mint-600 flex items-center justify-center">
+            <i data-lucide="utensils" class="w-5 h-5"></i>
           </div>
           <div class="flex-1 min-w-0">
-            <p class="font-medium text-foreground">待分配饮食</p>
-            <p class="text-sm text-muted truncate">${unassignedDiet} 条外食记录待分配餐次</p>
+            <p class="font-medium text-foreground">今日饮食</p>
+            <p class="text-sm text-muted truncate">已记录 ${todayMealCount} 餐 · 点击查看 / 记一餐</p>
           </div>
           <i data-lucide="chevron-right" class="w-5 h-5 text-muted flex-shrink-0"></i>
         </a>
@@ -943,13 +942,15 @@
               <i data-lucide="plus" class="w-4 h-4"></i> 添加商品
             </button>
           </div>
-          <div class="flex items-center justify-between p-3 bg-muted rounded-xl mb-4">
-            <span class="text-sm text-muted">合计</span>
-            <span class="text-xl font-bold text-primary" id="order-total">${formatMoney(data.total, data.currency)}</span>
-          </div>
-          <div class="flex gap-3 justify-end">
-            <button type="button" onclick="closeModal()" class="cx-btn cx-btn-secondary">取消</button>
-            <button type="submit" class="cx-btn cx-btn-primary">${isEdit ? '保存修改' : '保存'}</button>
+          <div class="sticky-submit-bar">
+            <div class="flex items-center justify-between p-3 bg-muted rounded-xl mb-3">
+              <span class="text-sm text-muted">合计</span>
+              <span class="text-xl font-bold text-primary" id="order-total">${formatMoney(data.total, data.currency)}</span>
+            </div>
+            <div class="flex gap-3 justify-end">
+              <button type="button" onclick="closeModal()" class="cx-btn cx-btn-secondary">取消</button>
+              <button type="submit" class="cx-btn cx-btn-primary">${isEdit ? '保存修改' : '保存'}</button>
+            </div>
           </div>
         </form>
       </div>
@@ -998,7 +999,7 @@
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
-      <div class="grid grid-cols-4 gap-2">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
         <div>
           <label class="text-[11px] text-muted block mb-0.5">品牌</label>
           <input type="text" name="item_brand_${idx}" value="${esc(it.brand||'')}" placeholder="品牌"
@@ -1006,12 +1007,12 @@
         </div>
         <div>
           <label class="text-[11px] text-muted block mb-0.5">单价</label>
-          <input type="number" step="0.01" min="0" name="item_price_${idx}" value="${it.unitPrice}"
+          <input type="number" inputmode="decimal" step="0.01" min="0" name="item_price_${idx}" value="${it.unitPrice}"
             class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'unitPrice',parseFloat(this.value)||0)">
         </div>
         <div>
           <label class="text-[11px] text-muted block mb-0.5">数量</label>
-          <input type="number" step="0.01" min="0" name="item_qty_${idx}" value="${it.quantity}"
+          <input type="number" inputmode="decimal" step="0.01" min="0" name="item_qty_${idx}" value="${it.quantity}"
             class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'quantity',parseFloat(this.value)||0)">
         </div>
         <div>
@@ -1024,7 +1025,7 @@
       <div class="flex items-center gap-2">
         <div class="flex-1">
           <label class="text-[11px] text-muted block mb-0.5">小计（这件商品实付金额）${it.subtotalEdited ? '<span class="text-primary" style="font-size:10px">(手动修改)</span>' : ''}</label>
-          <input type="number" step="0.01" min="0" name="item_subtotal_${idx}" value="${(it.subtotal != null ? it.subtotal : autoSubtotal)}"
+          <input type="number" inputmode="decimal" step="0.01" min="0" name="item_subtotal_${idx}" value="${(it.subtotal != null ? it.subtotal : autoSubtotal)}"
             class="cx-input cx-input-sm w-full" oninput="updateOrderItemSubtotal(${idx},parseFloat(this.value)||0)">
         </div>
       </div>
@@ -1034,13 +1035,9 @@
         <span>${unitCost > 0 ? `库存折合成本：${formatAvgCost(unitCost, it.unit, getConfig().defaultCurrency)}` : ''}</span>
       </div>` : ''}
       <div class="flex flex-wrap gap-3 text-xs">
-        <label class="flex items-center gap-1.5 cursor-pointer">
-          <input type="checkbox" ${it.toInventory?'checked':''} onchange="updateOrderItem(${idx},'toInventory',this.checked);window._orderRefresh()">
+        <label class="flex items-center gap-2 cursor-pointer min-h-[40px]">
+          <input type="checkbox" class="w-4 h-4" ${it.toInventory?'checked':''} onchange="updateOrderItem(${idx},'toInventory',this.checked);window._orderRefresh()">
           <span class="text-muted">计入库存</span>
-        </label>
-        <label class="flex items-center gap-1.5 cursor-pointer">
-          <input type="checkbox" ${it.toDiet?'checked':''} onchange="updateOrderItem(${idx},'toDiet',this.checked);window._orderRefresh()">
-          <span class="text-muted">计入饮食</span>
         </label>
       </div>
       ${it.toInventory ? `
@@ -1066,24 +1063,16 @@
       </div>
       <div class="pt-1">
         <label class="text-[11px] text-muted block mb-0.5">营养成分（每 100g，可选，留空不填）</label>
-        <div class="grid grid-cols-4 gap-2">
-          <input type="number" step="0.1" min="0" name="item_invcal_${idx}" value="${it.invCalories!=null?it.invCalories:''}" placeholder="热量kcal"
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <input type="number" inputmode="decimal" step="0.1" min="0" name="item_invcal_${idx}" value="${it.invCalories!=null?it.invCalories:''}" placeholder="热量kcal"
             class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'invCalories',this.value)">
-          <input type="number" step="0.1" min="0" name="item_invpro_${idx}" value="${it.invProtein!=null?it.invProtein:''}" placeholder="蛋白g"
+          <input type="number" inputmode="decimal" step="0.1" min="0" name="item_invpro_${idx}" value="${it.invProtein!=null?it.invProtein:''}" placeholder="蛋白g"
             class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'invProtein',this.value)">
-          <input type="number" step="0.1" min="0" name="item_invcarb_${idx}" value="${it.invCarbs!=null?it.invCarbs:''}" placeholder="碳水g"
+          <input type="number" inputmode="decimal" step="0.1" min="0" name="item_invcarb_${idx}" value="${it.invCarbs!=null?it.invCarbs:''}" placeholder="碳水g"
             class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'invCarbs',this.value)">
-          <input type="number" step="0.1" min="0" name="item_invfat_${idx}" value="${it.invFat!=null?it.invFat:''}" placeholder="脂肪g"
+          <input type="number" inputmode="decimal" step="0.1" min="0" name="item_invfat_${idx}" value="${it.invFat!=null?it.invFat:''}" placeholder="脂肪g"
             class="cx-input cx-input-sm w-full" oninput="updateOrderItem(${idx},'invFat',this.value)">
         </div>
-      </div>` : ''}
-      ${it.toDiet ? `
-      <div class="pt-1">
-        <label class="text-[11px] text-muted block mb-0.5">餐次</label>
-        <select name="item_meal_${idx}" class="cx-input cx-input-sm w-full" onchange="updateOrderItem(${idx},'meal',this.value)">
-          <option value="" ${(!it.meal || it.meal==='')?'selected':''}>稍后分配</option>
-          ${Object.entries(MEAL_NAMES).map(([k,v]) => `<option value="${k}" ${it.meal===k?'selected':''}>${v}</option>`).join('')}
-        </select>
       </div>` : ''}
     </div>
     `;
@@ -1191,7 +1180,6 @@
 
     let orders = getOrders();
     const existingIdx = orders.findIndex(o => o.id === data.id);
-    let unassigned = getUnassigned();
 
     if (existingIdx >= 0) {
       const oldOrder = orders[existingIdx];
@@ -1209,29 +1197,14 @@
         }
       });
       saveInventory(inv);
-      let diet = getDiet();
-      oldOrder.items.forEach(oldIt => {
-        if (oldIt.toDiet && oldIt.meal) {
-          diet = diet.map(m => ({
-            ...m,
-            items: m.items.filter(di => !(di.source === 'order' && di._orderItemId === oldIt.id))
-          })).filter(m => m.items.length > 0);
-          diet.forEach(m => { m.totalCalories = m.items.reduce((s,i)=>s+(i.calories||0),0); });
-        }
-      });
-      saveDiet(diet);
-      unassigned = unassigned.filter(u => !(u.orderId === oldOrder.id));
       orders[existingIdx] = data;
     } else {
       orders.push(data);
     }
     saveOrders(orders);
-    saveUnassigned(unassigned);
 
-    let diet = getDiet();
     const products = getProducts();
     let productsChanged = false;
-    let newUnassigned = [];
 
     data.items.forEach(it => {
       let p = findProductByName(it.productName);
@@ -1256,50 +1229,8 @@
         const unitCost = qty > 0 ? sub / qty : 0;
         mergeIntoInventory(p, it.quantity, it.unit, it.expiry || null, it.location || '其他', data.id, unitCost, it.brand, it.invCategory || p.category);
       }
-
-      if (it.toDiet) {
-        let cal = 0, pro = 0, carb = 0, fat = 0;
-        if (p.calories) {
-          const isMass = ['g','kg','ml','L','磅','斤','两'].includes(it.unit);
-          const factor = isMass ? (convertToGrams(it.quantity, it.unit) / 100) : it.quantity;
-          cal = (p.calories || 0) * factor;
-          pro = (p.protein || 0) * factor;
-          carb = (p.carbs || 0) * factor;
-          fat = (p.fat || 0) * factor;
-        }
-        if (it.meal) {
-          let mealEntry = diet.find(m => m.date === data.date && m.meal === it.meal);
-          if (!mealEntry) {
-            mealEntry = { id: uid(), date: data.date, meal: it.meal, items: [], totalCalories: 0 };
-            diet.push(mealEntry);
-          }
-          mealEntry.items.push({
-            id: uid(), source: 'order', productId: p.id, name: it.productName, brand: it.brand || '',
-            quantity: it.quantity, unit: it.unit,
-            calories: cal, protein: pro, carbs: carb, fat: fat,
-            _orderItemId: it.id
-          });
-          mealEntry.totalCalories = mealEntry.items.reduce((s, i) => s + (i.calories || 0), 0);
-        } else {
-          newUnassigned.push({
-            id: uid(),
-            orderId: data.id,
-            orderDate: data.date,
-            productId: p.id,
-            productName: it.productName,
-            brand: it.brand || '',
-            unit: it.unit,
-            quantity: it.quantity,
-            calories: cal, protein: pro, carbs: carb, fat: fat,
-            assigned: false
-          });
-        }
-      }
     });
     if (productsChanged) saveProducts(products);
-    saveDiet(diet);
-    const currentUnassigned = getUnassigned();
-    saveUnassigned([...currentUnassigned, ...newUnassigned]);
 
     closeModal();
     toast(isEdit ? '已更新采购' : '已新增采购');
@@ -1318,10 +1249,9 @@
     const o = orders.find(x => x.id === id);
     if (!o) return;
     const invCount = o.items.filter(i => i.toInventory).length;
-    const dietCount = o.items.filter(i => i.toDiet).length;
     confirmDialog(
       '删除采购记录',
-      `确定删除「${o.channel}」的采购记录吗？\n\n影响：\n• ${o.items.length} 件商品明细将被移除\n• ${invCount} 个库存项可能需要调整\n• ${dietCount} 条饮食记录将被移除\n\n记录将移至回收站，可恢复。`,
+      `确定删除「${o.channel}」的采购记录吗？\n\n影响：\n• ${o.items.length} 件商品明细将被移除\n• ${invCount} 个入库项可能需要调整\n\n记录将移至回收站，可恢复。`,
       () => {
         const recycle = getRecycle();
         recycle.push({ id: uid(), type: 'order', data: JSON.parse(JSON.stringify(o)), deletedAt: new Date().toISOString() });
@@ -1341,20 +1271,6 @@
           }
         });
         saveInventory(inv); saveInventoryLogs(logs);
-        let diet = getDiet();
-        o.items.forEach(it => {
-          if (it.toDiet && it.meal) {
-            diet = diet.map(m => ({
-              ...m,
-              items: m.items.filter(di => !(di.source === 'order' && di._orderItemId === it.id))
-            })).filter(m => m.items.length > 0);
-            diet.forEach(m => { m.totalCalories = m.items.reduce((s,i)=>s+(i.calories||0),0); });
-          }
-        });
-        saveDiet(diet);
-        let unassigned = getUnassigned();
-        unassigned = unassigned.filter(u => u.orderId !== o.id);
-        saveUnassigned(unassigned);
         saveOrders(orders.filter(x => x.id !== id));
         toast('已移至回收站');
         render();
@@ -1657,7 +1573,7 @@
           ${p ? `
           <div class="border-t border-border pt-3 mt-3">
             <p class="text-xs text-muted mb-2">关联商品营养信息 (每100g/100ml，修改将同步更新商品库)</p>
-            <div class="grid grid-cols-4 gap-2">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
               <div>
                 <label class="text-[11px] text-muted block mb-0.5">热量(kcal)</label>
                 <input type="number" id="ie-cal" step="1" min="0" value="${p.calories||0}" class="cx-input cx-input-sm w-full">
@@ -1940,7 +1856,6 @@
     if (params.date) dietSelectedDate = params.date;
     const cfg = getConfig();
     const diet = getDiet();
-    const unassignedPool = getUnassigned();
     const dayDiet = diet.filter(d => d.date === dietSelectedDate);
 
     const totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
@@ -2064,99 +1979,14 @@
           </div>`;
         }).join('')}
       </div>
-
-      ${unassignedPool.length > 0 ? `
-      <div class="cx-card p-4 mt-5 border-l-4 border-blue-400">
-        <div class="flex items-center gap-2 mb-2">
-          <i data-lucide="coffee" class="w-4 h-4 text-info-text"></i>
-          <h4 class="font-medium text-foreground text-sm">待分配餐次的外食 (${unassignedPool.length})</h4>
-        </div>
-        <div class="space-y-2" id="unassigned-list">
-          ${renderUnassignedGroups(unassignedPool)}
-        </div>
-      </div>` : ''}
     </div>
     `;
-  }
-
-  function renderUnassignedGroups(pool) {
-    const groups = {};
-    pool.forEach(u => {
-      const d = u.orderDate || '未知日期';
-      if (!groups[d]) groups[d] = [];
-      groups[d].push(u);
-    });
-    const dates = Object.keys(groups).sort((a,b) => b.localeCompare(a));
-    return dates.map(d => `
-      <div class="mb-2">
-        <p class="text-xs text-muted font-medium mb-1">${formatCNDateFull(d)}</p>
-        ${groups[d].map(u => `
-          <div class="flex items-center gap-2 p-2 bg-info/10 rounded-lg mb-1" data-unassigned-id="${u.id}">
-            <div class="flex-1 min-w-0">
-              <span class="text-sm">${esc(u.productName)}</span>
-              ${u.brand ? `<span class="text-xs text-muted ml-1">(${esc(u.brand)})</span>` : ''}
-              <span class="text-xs text-muted ml-1">×${u.quantity}${esc(u.unit)}</span>
-            </div>
-            <input type="date" value="${d}" class="cx-input cx-input-sm w-32" data-ua-date="${u.id}">
-            <select class="cx-input cx-input-sm w-24" data-ua-meal="${u.id}">
-              <option value="">餐次</option>
-              ${Object.entries(MEAL_NAMES).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}
-            </select>
-            <button onclick="assignUnassignedFood('${u.id}')" class="cx-btn cx-btn-sm cx-btn-primary">分配</button>
-            <button onclick="deleteUnassignedFood('${u.id}')" class="w-7 h-7 rounded-lg hover:bg-error/20 text-muted hover:text-error-text flex items-center justify-center">
-              <i data-lucide="x" class="w-4 h-4"></i>
-            </button>
-          </div>
-        `).join('')}
-      </div>
-    `).join('');
   }
 
   window.toggleEnergyUnit = function () {
     const cfg = getConfig();
     cfg.energyUnit = cfg.energyUnit === 'kcal' ? 'kJ' : 'kcal';
     setConfig(cfg);
-    render();
-  };
-
-  window.assignUnassignedFood = function (uaId) {
-    const pool = getUnassigned();
-    const item = pool.find(u => u.id === uaId);
-    if (!item) return;
-
-    const dateInput = document.querySelector(`input[data-ua-date="${uaId}"]`);
-    const mealSelect = document.querySelector(`select[data-ua-meal="${uaId}"]`);
-    const targetDate = dateInput ? dateInput.value : item.orderDate;
-    const targetMeal = mealSelect ? mealSelect.value : '';
-
-    if (!targetDate) { toast('请选择日期'); return; }
-    if (!targetMeal) { toast('请选择餐次'); return; }
-
-    let diet = getDiet();
-    let mealEntry = diet.find(m => m.date === targetDate && m.meal === targetMeal);
-    if (!mealEntry) {
-      mealEntry = { id: uid(), date: targetDate, meal: targetMeal, items: [], totalCalories: 0 };
-      diet.push(mealEntry);
-    }
-    mealEntry.items.push({
-      id: uid(), source: 'order', productId: item.productId || null,
-      name: item.productName, brand: item.brand || '',
-      quantity: item.quantity, unit: item.unit,
-      calories: item.calories || 0, protein: item.protein || 0, carbs: item.carbs || 0, fat: item.fat || 0,
-      _unassignedId: uaId
-    });
-    mealEntry.totalCalories = mealEntry.items.reduce((s,i) => s+(i.calories||0),0);
-    saveDiet(diet);
-    saveUnassigned(pool.filter(u => u.id !== uaId));
-
-    toast('已分配到' + MEAL_NAMES[targetMeal]);
-    render();
-  };
-
-  window.deleteUnassignedFood = function (uaId) {
-    const pool = getUnassigned();
-    saveUnassigned(pool.filter(u => u.id !== uaId));
-    toast('已移除');
     render();
   };
 
@@ -2182,7 +2012,6 @@
     }
 
     const inventory = getInventory().filter(i => i.quantity > 0);
-    const unassignedPool = getUnassigned();
 
     let defaultTab = 'inventory';
     let manualMode = 'serving';
@@ -2213,7 +2042,6 @@
         <div class="flex gap-1 mb-4 border-b border-border">
           <button onclick="switchDietTab('inventory')" id="dt-inventory" class="px-3 py-2 text-sm font-medium border-b-2 ${s.defaultTab==='inventory'?'border-primary text-primary':'border-transparent text-muted hover:text-foreground'}">从库存</button>
           <button onclick="switchDietTab('manual')" id="dt-manual" class="px-3 py-2 text-sm font-medium border-b-2 ${s.defaultTab==='manual'?'border-primary text-primary':'border-transparent text-muted hover:text-foreground'}">手动录入</button>
-          <button onclick="switchDietTab('order')" id="dt-order" class="px-3 py-2 text-sm font-medium border-b-2 ${s.defaultTab==='order'?'border-primary text-primary':'border-transparent text-muted hover:text-foreground'}">外食关联${unassignedPool.length>0?` (${unassignedPool.length})`:''}</button>
         </div>
         <div id="diet-tab-content">
           <div id="dtab-inventory" class="${s.defaultTab==='inventory'?'':'hidden'}">
@@ -2256,7 +2084,7 @@
 
               <div id="dm-per100-fields" class="${s.manualMode==='per100'?'':'hidden'}">
                 <p class="text-xs text-muted mb-2">每100g营养值</p>
-                <div class="grid grid-cols-4 gap-2 mb-2">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
                   <div>
                     <label class="text-[11px] text-muted block mb-0.5">热量</label>
                     <input type="number" id="dm-pcal" step="1" min="0" class="cx-input cx-input-sm w-full" placeholder="0" oninput="calcManualPer100()">
@@ -2312,14 +2140,8 @@
                   <input type="text" id="dm-unit" class="cx-input cx-input-sm w-20" placeholder="份" value="${esc(d.unit||'份')}">
                 </div>
               </div>
-              <button onclick="addManualDiet('${meal}', ${isEdit}, '${editMealId||''}', '${editItemId||''}')" class="cx-btn cx-btn-primary w-full">${isEdit?'更新':'添加到'}${MEAL_NAMES[meal]}</button>
+              <button onclick="addManualDiet('${meal}', ${isEdit}, '${editMealId||''}', '${editItemId||''}')" class="cx-btn cx-btn-primary w-full sticky-submit">${isEdit?'更新':'添加到'}${MEAL_NAMES[meal]}</button>
             </div>
-          </div>
-          <div id="dtab-order" class="${s.defaultTab==='order'?'':'hidden'}">
-            ${unassignedPool.length === 0 ? '<p class="text-sm text-muted text-center py-4">暂无待分配的外食记录</p>' :
-              `<div class="space-y-2">
-                ${renderUnassignedAssignList(unassignedPool, meal, isEdit, editMealId, editItemId)}
-              </div>`}
           </div>
         </div>
       </div>
@@ -2330,42 +2152,11 @@
   }
   window.openAddDietForm = openAddDietForm;
 
-  function renderUnassignedAssignList(pool, meal, isEdit, editMealId, editItemId) {
-    const groups = {};
-    pool.forEach(u => {
-      const d = u.orderDate || '未知日期';
-      if (!groups[d]) groups[d] = [];
-      groups[d].push(u);
-    });
-    const dates = Object.keys(groups).sort((a,b) => b.localeCompare(a));
-    return dates.map(d => `
-      <div class="mb-2">
-        <p class="text-xs text-muted font-medium mb-1">${formatCNDateFull(d)}</p>
-        ${groups[d].map(u => `
-          <div class="flex items-center justify-between p-2 bg-muted/50 rounded-xl mb-1">
-            <div class="min-w-0 flex-1">
-              <p class="text-sm font-medium truncate">${esc(u.productName)}</p>
-              <p class="text-xs text-muted">×${u.quantity}${esc(u.unit)} · ${formatEnergy(u.calories||0)}</p>
-            </div>
-            <div class="flex items-center gap-1 flex-shrink-0">
-              <input type="date" value="${dietSelectedDate}" class="cx-input cx-input-sm w-32" data-ua-date="${u.id}">
-              <select class="cx-input cx-input-sm w-20" data-ua-meal="${u.id}">
-                <option value="">餐次</option>
-                ${Object.entries(MEAL_NAMES).map(([k,v]) => `<option value="${k}" ${k===meal?'selected':''}>${v}</option>`).join('')}
-              </select>
-              <button onclick="assignFromDietModal('${u.id}','${meal}',${isEdit},'${editMealId||''}','${editItemId||''}')" class="cx-btn cx-btn-sm cx-btn-primary">添加</button>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `).join('');
-  }
-
   window.switchDietTab = function (tab) {
     const s = window._dietFormState;
     if (!s) return;
     s.defaultTab = tab;
-    ['inventory','manual','order'].forEach(t => {
+    ['inventory','manual'].forEach(t => {
       const el = $('#dtab-' + t);
       const btn = $('#dt-' + t);
       if (el) el.classList.toggle('hidden', t !== tab);
@@ -2572,61 +2363,6 @@
     render();
   };
 
-  window.assignFromDietModal = function (uaId, meal, isEdit, editMealId, editItemId) {
-    const pool = getUnassigned();
-    const item = pool.find(u => u.id === uaId);
-    if (!item) return;
-
-    const dateInput = document.querySelector(`input[data-ua-date="${uaId}"]`);
-    const mealSelect = document.querySelector(`select[data-ua-meal="${uaId}"]`);
-    const targetDate = dateInput ? dateInput.value : item.orderDate;
-    const targetMeal = mealSelect ? mealSelect.value : meal;
-
-    if (!targetDate) { toast('请选择日期'); return; }
-    if (!targetMeal) { toast('请选择餐次'); return; }
-
-    const dietItem = {
-      id: uid(), source: 'order', productId: item.productId || null,
-      name: item.productName, brand: item.brand || '',
-      quantity: item.quantity, unit: item.unit,
-      calories: item.calories || 0, protein: item.protein || 0, carbs: item.carbs || 0, fat: item.fat || 0,
-      _unassignedId: uaId
-    };
-
-    let diet = getDiet();
-    if (isEdit && editMealId && editItemId) {
-      const mealEntry = diet.find(m => m.id === editMealId);
-      if (mealEntry) {
-        const idx = mealEntry.items.findIndex(i => i.id === editItemId);
-        if (idx >= 0) {
-          dietItem.id = editItemId;
-          mealEntry.items[idx] = dietItem;
-          mealEntry.totalCalories = mealEntry.items.reduce((s,i) => s+(i.calories||0),0);
-          saveDiet(diet);
-          saveUnassigned(pool.filter(u => u.id !== uaId));
-          closeModal();
-          toast('已更新');
-          render();
-          return;
-        }
-      }
-    }
-
-    let mealEntry = diet.find(m => m.date === targetDate && m.meal === targetMeal);
-    if (!mealEntry) {
-      mealEntry = { id: uid(), date: targetDate, meal: targetMeal, items: [], totalCalories: 0 };
-      diet.push(mealEntry);
-    }
-    mealEntry.items.push(dietItem);
-    mealEntry.totalCalories = mealEntry.items.reduce((s,i) => s+(i.calories||0),0);
-    saveDiet(diet);
-    saveUnassigned(pool.filter(u => u.id !== uaId));
-
-    closeModal();
-    toast('已添加到' + MEAL_NAMES[targetMeal]);
-    render();
-  };
-
   window.deleteDietItem = function (mealId, itemId) {
     let diet = getDiet();
     const mealEntry = diet.find(m => m.id === mealId);
@@ -2778,8 +2514,32 @@
     const cfg = getConfig();
     const body = getBody();
     const latestBody = latestBodyRecord(body);
+    const productCount = getProducts().length;
+    const recycleCount = getRecycle().length;
     return `
     <div class="space-y-5">
+      <div class="cx-card p-5">
+        <h3 class="text-base font-semibold mb-4">商品与记录</h3>
+        <div class="space-y-2">
+          <a href="#/products" class="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors">
+            <span class="flex items-center gap-2 text-sm">
+              <i data-lucide="shopping-bag" class="w-4 h-4 text-taro-600"></i>
+              <span class="font-medium text-foreground">商品库</span>
+              <span class="text-xs text-muted">${productCount} 种</span>
+            </span>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-muted"></i>
+          </a>
+          <a href="#/recycle" class="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors">
+            <span class="flex items-center gap-2 text-sm">
+              <i data-lucide="trash-2" class="w-4 h-4 text-muted"></i>
+              <span class="font-medium text-foreground">回收站</span>
+              <span class="text-xs text-muted">${recycleCount} 项</span>
+            </span>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-muted"></i>
+          </a>
+        </div>
+      </div>
+
       <div class="cx-card p-5">
         <h3 class="text-base font-semibold mb-4">设置</h3>
         <div class="space-y-4">

@@ -2,7 +2,7 @@
 <html lang="zh-CN" class="light">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>仓序食时</title>
     <link rel="stylesheet" href="./colors_and_type.css">
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
@@ -103,6 +103,43 @@
       }
       details > summary { list-style: none; cursor: pointer; }
       details > summary::-webkit-details-marker { display: none; }
+
+      /* 数字输入框隐藏上下箭头，避免误触 */
+      input[type=number]::-webkit-inner-spin-button,
+      input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+      input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+
+      /* 防 iOS 字体自动放大与横向溢出 */
+      html, body { -webkit-text-size-adjust: 100%; overflow-x: hidden; }
+
+      /* ===== 移动端适配 ===== */
+      @media (max-width: 767px) {
+        /* 弹窗改底部抽屉 */
+        .modal-backdrop { align-items: flex-end; padding: 0; }
+        .modal-panel {
+          max-width: 100%; width: 100%; max-height: 94vh;
+          border-radius: 20px 20px 0 0;
+          -webkit-overflow-scrolling: touch;
+        }
+        /* 输入框 16px 防 iOS 聚焦放大，并加高触控区域 */
+        .cx-input, select.cx-input { font-size: 16px; height: 44px; }
+        .cx-input-sm, select.cx-input-sm { font-size: 16px; height: 40px; }
+        /* 紧凑图标按钮放大到 40px 触控目标 */
+        button.w-7.h-7, button.w-8.h-8 { width: 40px; height: 40px; flex: none; }
+        /* 表单固定底栏（含合计 + 主按钮） */
+        .sticky-submit-bar {
+          position: sticky; bottom: 0; z-index: 6;
+          background: var(--cangxu-white);
+          margin: 12px -24px -24px;
+          padding: 12px 24px calc(14px + env(safe-area-inset-bottom, 0px));
+          border-top: 1px solid var(--cangxu-border);
+        }
+        /* 全宽主按钮悬浮固定 */
+        .sticky-submit {
+          position: sticky; bottom: 12px; z-index: 6;
+          box-shadow: 0 -6px 16px rgba(45,55,72,0.12);
+        }
+      }
     </style>
 </head>
 <body class="min-h-screen font-sans antialiased">
