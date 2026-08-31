@@ -232,3 +232,28 @@ create trigger diet_updated_at before update on public.diet
 drop trigger if exists user_config_updated_at on public.user_config;
 create trigger user_config_updated_at before update on public.user_config
   for each row execute function public.handle_updated_at();
+
+-- ========== 意见反馈 ==========
+-- 说明：任何用户（含未登录匿名用户）都可以【提交】反馈，但客户端【不能】读取/修改/删除。
+-- 反馈内容请在 Supabase 后台 Table Editor -> feedback 表中查看（后台使用 service_role，不受 RLS 限制）。
+create table if not exists public.feedback (
+  id uuid primary key default gen_random_uuid(),
+  message text not null,
+  contact text,
+  context text,
+  user_id uuid references auth.users(id),
+  user_agent text,
+  app_version text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.feedback enable row level security;
+
+-- 仅开放写入（匿名 + 已登录用户均可 insert），不创建 select/update/delete 策略
+drop policy if exists "任何人可提交反馈" on public.feedback;
+create policy "任何人可提交反馈" on public.feedback
+  for insert to anon, authenticated
+  with check (true);
+
+-- 索引：按时间倒序查看
+create index if not exists feedback_created_at_idx on public.feedback (created_at desc);

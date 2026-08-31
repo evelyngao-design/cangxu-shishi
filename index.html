@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>仓序食时</title>
-    <link rel="stylesheet" href="./colors_and_type.css">
+    <link rel="stylesheet" href="./colors_and_type.css?v=20260831b">
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
     <script src="https://unpkg.com/lucide@0.485.0/dist/umd/lucide.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -109,6 +109,9 @@
       input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
       input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 
+      /* 表单控件允许在栅格/弹性布局中收缩，避免原生日期/下拉框撑破列宽造成重叠 */
+      input, select, textarea { min-width: 0; box-sizing: border-box; }
+
       /* 防 iOS 字体自动放大与横向溢出 */
       html, body { -webkit-text-size-adjust: 100%; overflow-x: hidden; }
 
@@ -144,7 +147,7 @@
 </head>
 <body class="min-h-screen font-sans antialiased">
     <div id="app"></div>
-    <script src="./cloud.js"></script>
-    <script src="./app.js"></script>
+    <script src="./cloud.js?v=20260831b"></script>
+    <script src="./app.js?v=20260831b"></script>
 </body>
 </html>

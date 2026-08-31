@@ -2665,6 +2665,27 @@
       </div>
 
       <div class="cx-card p-5">
+        <h3 class="text-base font-semibold mb-4">帮助与反馈</h3>
+        <div class="space-y-2">
+          <button onclick="showOnboarding()" class="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors">
+            <span class="flex items-center gap-2 text-sm">
+              <i data-lucide="compass" class="w-4 h-4 text-primary"></i>
+              <span class="font-medium text-foreground">新手指引</span>
+              <span class="text-xs text-muted">三步上手</span>
+            </span>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-muted"></i>
+          </button>
+          <button onclick="showFeedback()" class="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors">
+            <span class="flex items-center gap-2 text-sm">
+              <i data-lucide="message-square" class="w-4 h-4 text-pink-500"></i>
+              <span class="font-medium text-foreground">向开发者反馈</span>
+            </span>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-muted"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="cx-card p-5">
         <h3 class="text-base font-semibold mb-4">数据管理</h3>
         <div class="space-y-2">
           <button onclick="exportData()" class="cx-btn cx-btn-secondary w-full">
@@ -2689,6 +2710,120 @@
     cfg.weightUnit = cfg.weightUnit === 'kg' ? 'lb' : 'kg';
     setConfig(cfg);
     render();
+  };
+
+  // ---------- 意见反馈 & 新手指引 ----------
+  window.showFeedback = function () {
+    const route = (location.hash || '').replace('#/', '').split('?')[0] || 'home';
+    openModal(`
+      <div class="p-6">
+        <div class="flex items-start justify-between mb-1">
+          <h3 class="text-lg font-semibold text-foreground">向开发者反馈</h3>
+          <button onclick="closeModal()" class="w-9 h-9 -mr-2 -mt-1 rounded-full hover:bg-muted flex items-center justify-center text-muted" aria-label="关闭">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <p class="text-sm text-muted mb-4 leading-relaxed">遇到的问题、想要的功能、或任何建议都可以写在这里，会直接送到开发者手中，帮我们把产品做得更好用。</p>
+        <form onsubmit="submitFeedbackForm(event)">
+          <label class="text-xs text-muted block mb-1">你的意见 <span class="text-error-text">*</span></label>
+          <textarea name="message" rows="5" maxlength="2000" required
+            class="cx-input w-full mb-3"
+            style="height:auto;min-height:128px;resize:vertical;padding-top:10px;padding-bottom:10px;line-height:1.6"
+            placeholder="比如：某个页面操作不顺手、希望增加某个功能、数据好像算错了……"></textarea>
+          <label class="text-xs text-muted block mb-1">联系方式（选填）</label>
+          <input type="text" name="contact" maxlength="200" class="cx-input w-full mb-1" placeholder="邮箱或微信，方便我们就问题回复你">
+          <input type="hidden" name="context" value="${esc(route)}">
+          <p class="text-[11px] text-muted mb-4">反馈会匿名提交；填写联系方式仅用于回复你，不会作其他用途。</p>
+          <div class="flex gap-3 justify-end">
+            <button type="button" onclick="closeModal()" class="cx-btn cx-btn-secondary">取消</button>
+            <button type="submit" class="cx-btn cx-btn-primary">提交反馈</button>
+          </div>
+        </form>
+      </div>
+    `);
+  };
+
+  window.submitFeedbackForm = async function (e) {
+    e.preventDefault();
+    const form = e.target;
+    const message = (form.message.value || '').trim();
+    if (!message) { toast('请先填写反馈内容'); return; }
+    const btn = form.querySelector('button[type=submit]');
+    if (btn) { btn.disabled = true; btn.textContent = '提交中…'; }
+    try {
+      if (!window.CloudSync || !window.CloudSync.submitFeedback) throw new Error('反馈模块未加载');
+      await window.CloudSync.submitFeedback({
+        message,
+        contact: (form.contact.value || '').trim(),
+        context: form.context.value || '',
+        appVersion: '1.0'
+      });
+      closeModal();
+      toast('感谢反馈，已送达开发者');
+    } catch (err) {
+      const msg = (err && err.message) ? err.message : '网络异常';
+      toast('提交失败：' + msg + '，请稍后再试');
+      if (btn) { btn.disabled = false; btn.textContent = '提交反馈'; }
+    }
+  };
+
+  window.showOnboarding = function () {
+    openModal(`
+      <div class="p-6">
+        <div class="flex items-start justify-between mb-1">
+          <div>
+            <h3 class="text-lg font-semibold text-foreground">欢迎使用仓序食时</h3>
+            <p class="text-sm text-muted mt-1">三步把「买菜 → 存菜 → 吃饭」串起来</p>
+          </div>
+          <button onclick="closeModal()" class="w-9 h-9 -mr-2 -mt-1 rounded-full hover:bg-muted flex items-center justify-center text-muted" aria-label="关闭">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="space-y-3 my-5">
+          <div class="flex gap-3 p-3.5 rounded-2xl bg-taro-100/60">
+            <div class="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-none text-taro-600 shadow-sm">
+              <i data-lucide="receipt-text" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-foreground">第 1 步 · 记账</p>
+              <p class="text-xs text-muted mt-1 leading-relaxed">买完东西，在「记账」记一笔采购：填商品、单价、数量和保质期，一笔订单可含多件商品。</p>
+            </div>
+          </div>
+          <div class="flex justify-center text-muted">
+            <i data-lucide="arrow-down" class="w-4 h-4"></i>
+          </div>
+          <div class="flex gap-3 p-3.5 rounded-2xl bg-mint-100/60">
+            <div class="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-none text-mint-600 shadow-sm">
+              <i data-lucide="boxes" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-foreground">第 2 步 · 库存</p>
+              <p class="text-xs text-muted mt-1 leading-relaxed">保存后食材自动进入「库存」，帮你盯保质期、提醒快过期、按采购价自动算折合成本。</p>
+            </div>
+          </div>
+          <div class="flex justify-center text-muted">
+            <i data-lucide="arrow-down" class="w-4 h-4"></i>
+          </div>
+          <div class="flex gap-3 p-3.5 rounded-2xl bg-pink-100/60">
+            <div class="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-none text-pink-500 shadow-sm">
+              <i data-lucide="utensils-crossed" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-foreground">第 3 步 · 饮食</p>
+              <p class="text-xs text-muted mt-1 leading-relaxed">吃饭时在「饮食」从库存选食材或手动录入，自动统计热量和三大营养素，库存同步扣减。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-start gap-2 p-3 rounded-xl bg-cream-100/60 text-xs text-muted mb-4">
+          <i data-lucide="lightbulb" class="w-4 h-4 flex-none mt-0.5 text-cream-600"></i>
+          <span class="leading-relaxed">商品库、回收站、单位/渠道字典和云端同步，都在「我的」页面里管理；数据默认保存在本机，登录后可多设备同步。</span>
+        </div>
+
+        <button onclick="closeModal()" class="cx-btn cx-btn-primary w-full">开始使用</button>
+      </div>
+    `);
   };
 
   // ---------- 字典管理 ----------
@@ -3279,6 +3414,14 @@
 
     window.addEventListener('hashchange', render);
     render();
+
+    // 首次访问自动展示新手指引（仅一次；之后可在「我的 → 新手指引」回看）
+    try {
+      if (!localStorage.getItem('cx_onboarded_v1')) {
+        localStorage.setItem('cx_onboarded_v1', '1');
+        setTimeout(() => { if (window.showOnboarding) window.showOnboarding(); }, 500);
+      }
+    } catch (e) {}
   }
 
   if (document.readyState === 'loading') {

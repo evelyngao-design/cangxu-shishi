@@ -365,6 +365,30 @@
     }
   }
 
+  // 提交意见反馈：无需登录，匿名/登录用户都可写入 feedback 表（仅写入，客户端不可读，开发者在 Supabase 后台查看）
+  async function submitFeedback(payload) {
+    const client = initClient();
+    if (!client) throw new Error('云端未配置，暂时无法提交反馈');
+    const p = payload || {};
+    const row = {
+      message: String(p.message || '').trim().slice(0, 2000),
+      contact: String(p.contact || '').trim().slice(0, 200) || null,
+      context: String(p.context || '').trim().slice(0, 300) || null,
+      user_agent: String(navigator.userAgent || '').slice(0, 500),
+      app_version: String(p.appVersion || '').slice(0, 40) || null
+    };
+    if (!row.message) throw new Error('反馈内容不能为空');
+    if (currentUser && currentUser.id) row.user_id = currentUser.id;
+    try {
+      const { error } = await client.from('feedback').insert(row);
+      if (error) throw error;
+    } catch (e) {
+      // 复用友好错误提示（例如 feedback 表未建时，提示去 Supabase 运行 supabase-setup.sql）
+      throw new Error(friendlyError(e));
+    }
+    return { ok: true };
+  }
+
   function saveConfig(url, key) {
     localStorage.setItem(CLOUD_KEYS.url, url);
     localStorage.setItem(CLOUD_KEYS.key, key);
@@ -398,6 +422,7 @@
     getSyncState, getLastError: () => lastError,
     pushAll, pullAll, pushTable,
     schedulePush,
+    submitFeedback,
     saveConfig, clearConfig,
     getUrl, getKey
   };
