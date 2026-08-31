@@ -111,6 +111,19 @@
     }
   }
 
+  // 一次性迁移：库存不足提醒改为「手动点亮」。旧版演示商品自带阈值会默认提醒，
+  // 这里统一清零（阈值 0=不提醒），用户按需在库存上点亮铃铛。
+  function migrateAlertOptIn() {
+    if (localStorage.getItem('cx_alert_optin_v1')) return;
+    const products = getProducts();
+    let changed = false;
+    products.forEach(p => {
+      if (p.stockThreshold && p.stockThreshold > 0) { p.stockThreshold = 0; changed = true; }
+    });
+    if (changed) saveProducts(products);
+    localStorage.setItem('cx_alert_optin_v1', '1');
+  }
+
   // 把 'YYYY-MM-DD' 按本地时区解析为 Date（避免 new Date('YYYY-MM-DD') 按 UTC 解析导致跨时区偏移）
   function parseLocalDate(d) {
     if (d instanceof Date) return d;
@@ -680,11 +693,7 @@
       if (!i.expiry) return false;
       return daysBetween(now, i.expiry) <= 3;
     }).length;
-    const lowStockCount = inventory.filter(i => {
-      const p = i.productId ? findProductById(i.productId) : null;
-      const thr = p ? p.stockThreshold : null;
-      return thr != null && i.quantity <= thr;
-    }).length;
+    const lowStockCount = inventory.filter(isLowStockItem).length;
     const todayMealCount = todayDiet.length;
 
     const recentOrders = [...orders].sort((a,b) => (b.createdAt||b.date).localeCompare(a.createdAt||a.date)).slice(0, 5);
@@ -1605,20 +1614,14 @@
 
     const expiringItems = inventory.filter(i => i.expiry && daysBetween(now, i.expiry) <= 3 && daysBetween(now, i.expiry) >= 0);
     const soonItems = inventory.filter(i => i.expiry && daysBetween(now, i.expiry) > 3 && daysBetween(now, i.expiry) <= 7);
-    const lowStockItems = inventory.filter(i => {
-      const p = i.productId ? findProductById(i.productId) : null;
-      return p && p.stockThreshold != null && i.quantity <= p.stockThreshold;
-    });
+    const lowStockItems = inventory.filter(isLowStockItem);
     const expiredItems = inventory.filter(i => i.expiry && daysBetween(now, i.expiry) < 0);
 
     if (invFilters.category) inventory = inventory.filter(i => i.category === invFilters.category);
     if (invFilters.location) inventory = inventory.filter(i => i.location === invFilters.location);
     if (invFilters.status === 'expiring') inventory = inventory.filter(i => i.expiry && daysBetween(now, i.expiry) <= 7);
     if (invFilters.status === 'low') {
-      inventory = inventory.filter(i => {
-        const p = i.productId ? findProductById(i.productId) : null;
-        return p && p.stockThreshold != null && i.quantity <= p.stockThreshold;
-      });
+      inventory = inventory.filter(isLowStockItem);
     }
 
     const groups = {};
@@ -1718,6 +1721,75 @@
     `;
   }
 
+  // ---------- 库存不足提醒（按商品；阈值 0=不提醒，>0=低于该数量提醒） ----------
+  const MASS_UNITS = ['g', 'kg', 'ml', 'l', 'L'];
+  function resolveProductForInv(item) {
+    const products = getProducts();
+    if (item.productId) {
+      const byId = products.find(x => x.id === item.productId);
+      if (byId) return byId;
+    }
+    return products.find(x => x.name === item.productName) || null;
+  }
+  function alertThresholdFor(item) {
+    const p = resolveProductForInv(item);
+    return p ? (parseFloat(p.stockThreshold) || 0) : 0;
+  }
+  function isLowStockItem(item) {
+    const thr = alertThresholdFor(item);
+    return thr > 0 && (parseFloat(item.quantity) || 0) <= thr;
+  }
+  // 建议提醒阈值 = 原始入库量的 10%（计数类至少 1 个，称重/容量类取整）
+  function suggestThreshold(item) {
+    const logs = getInventoryLogs().filter(l => l.inventoryId === item.id && l.type === 'in');
+    let base = logs.reduce((s, l) => s + (parseFloat(l.quantity) || 0), 0);
+    if (!base || base <= 0) base = parseFloat(item.quantity) || 0;
+    let thr = base * 0.1;
+    if (MASS_UNITS.includes(item.unit)) {
+      if (item.unit === 'kg' || item.unit === 'l' || item.unit === 'L') thr = Math.round(thr * 10) / 10;
+      else thr = Math.round(thr);
+    } else {
+      thr = Math.max(1, Math.round(thr));
+    }
+    return thr > 0 ? thr : 1;
+  }
+  function setProductThreshold(item, threshold) {
+    const products = getProducts();
+    let p = item.productId ? products.find(x => x.id === item.productId) : null;
+    if (!p) p = products.find(x => x.name === item.productName) || null;
+    if (!p) return false;
+    p.stockThreshold = threshold;
+    saveProducts(products);
+    return true;
+  }
+  // 铃铛快捷开关：开启时用智能默认（入库量 10%），关闭时置 0
+  window.toggleStockAlert = function (invId) {
+    const item = getInventory().find(i => i.id === invId);
+    if (!item) return;
+    const cur = alertThresholdFor(item);
+    if (cur > 0) {
+      if (!setProductThreshold(item, 0)) { toast('未找到对应商品，无法设置提醒'); return; }
+      toast('已关闭「' + item.productName + '」的库存提醒');
+    } else {
+      const thr = suggestThreshold(item);
+      if (!setProductThreshold(item, thr)) { toast('未找到对应商品，无法设置提醒'); return; }
+      toast('已开启提醒：低于 ' + thr + item.unit + ' 时提示');
+    }
+    if (document.querySelector('.cx-modal')) showInventoryDetail(invId);
+    render();
+  };
+  // 详情弹窗里直接修改阈值
+  window.saveStockThreshold = function (invId, inputEl) {
+    const item = getInventory().find(i => i.id === invId);
+    if (!item) return;
+    const v = parseFloat(inputEl.value);
+    if (isNaN(v) || v < 0) { toast('请输入正确的数量'); return; }
+    if (!setProductThreshold(item, v)) { toast('未找到对应商品，无法设置'); return; }
+    toast(v > 0 ? ('提醒阈值已设为 ' + v + item.unit) : '已关闭库存提醒');
+    showInventoryDetail(invId);
+    render();
+  };
+
   function renderInventoryCard(i, now) {
     let expiryText = '无保质期';
     let expiryClass = 'text-muted';
@@ -1729,7 +1801,9 @@
       else { expiryText = `${days}天后过期`; expiryClass = 'text-muted'; }
     }
     const p = i.productId ? findProductById(i.productId) : null;
-    const isLow = p && p.stockThreshold != null && i.quantity <= p.stockThreshold;
+    const alertThr = alertThresholdFor(i);
+    const alertOn = alertThr > 0;
+    const isLow = isLowStockItem(i);
 
     return `
     <div class="cx-card p-4 hover:shadow-lg transition-shadow cursor-pointer" onclick="showInventoryDetail('${i.id}')">
@@ -1738,13 +1812,21 @@
           <h4 class="font-medium text-foreground truncate">${esc(i.productName)}</h4>
           ${i.brand ? `<p class="text-xs text-muted truncate">${esc(i.brand)}</p>` : ''}
         </div>
-        <button onclick="event.stopPropagation();openOutboundForm('${i.id}')" class="cx-btn cx-btn-sm cx-btn-secondary flex-shrink-0">
-          <i data-lucide="minus-circle" class="w-3.5 h-3.5"></i> 出库
-        </button>
+        <div class="flex items-center gap-1 flex-shrink-0">
+          <button onclick="event.stopPropagation();toggleStockAlert('${i.id}')" title="${alertOn ? '关闭库存提醒' : '开启库存提醒'}"
+            class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${alertOn ? 'bg-primary/10 text-primary' : 'text-muted hover:bg-muted'}"
+            aria-label="${alertOn ? '关闭库存提醒' : '开启库存提醒'}">
+            <i data-lucide="${alertOn ? 'bell-ring' : 'bell'}" class="w-4 h-4"></i>
+          </button>
+          <button onclick="event.stopPropagation();openOutboundForm('${i.id}')" class="cx-btn cx-btn-sm cx-btn-secondary">
+            <i data-lucide="minus-circle" class="w-3.5 h-3.5"></i> 出库
+          </button>
+        </div>
       </div>
       <div class="flex items-center gap-3 text-sm mb-2">
         <span class="font-semibold text-foreground">${i.quantity}${esc(i.unit)}</span>
         ${isLow ? '<span class="cx-tag cx-tag-primary" style="font-size:10px;padding:1px 6px">库存不足</span>' : ''}
+        ${alertOn ? `<span class="text-[10px] text-muted flex items-center gap-0.5"><i data-lucide="bell-ring" class="w-3 h-3"></i>低于${alertThr}提醒</span>` : ''}
       </div>
       <div class="flex items-center justify-between text-xs">
         <span class="flex items-center gap-1 ${expiryClass}">
@@ -1766,6 +1848,8 @@
     if (!inv) return;
     const logs = getInventoryLogs().filter(l => l.inventoryId === id).sort((a,b) => b.date.localeCompare(a.date));
     const p = inv.productId ? findProductById(inv.productId) : null;
+    const alertThr = alertThresholdFor(inv);
+    const alertOn = alertThr > 0;
     openModal(`
       <div class="p-6">
         <div class="flex items-center justify-between mb-5">
@@ -1786,6 +1870,23 @@
           </div>
           <div class="flex justify-between py-2 border-b border-border/50">
             <span class="text-muted text-sm">库存数量</span><span class="text-sm font-semibold text-primary">${inv.quantity}${esc(inv.unit)}</span>
+          </div>
+          <div class="flex items-center justify-between py-2 border-b border-border/50">
+            <span class="text-muted text-sm flex items-center gap-1.5"><i data-lucide="bell" class="w-3.5 h-3.5"></i>库存不足提醒</span>
+            <span class="flex items-center gap-2">
+              ${alertOn ? `
+                <span class="text-xs text-muted">低于</span>
+                <input type="number" id="inv-alert-thr" min="0" step="0.01" value="${alertThr}"
+                  class="cx-input w-20 py-1 px-2 text-sm text-right"
+                  onchange="saveStockThreshold('${inv.id}', this)">
+                <span class="text-xs text-muted">${esc(inv.unit)}</span>
+              ` : `<span class="text-sm text-muted">未开启</span>`}
+              <button onclick="toggleStockAlert('${inv.id}')" title="${alertOn ? '关闭提醒' : '开启提醒'}"
+                class="w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${alertOn ? 'bg-primary/10 text-primary' : 'text-muted hover:bg-muted'}"
+                aria-label="${alertOn ? '关闭提醒' : '开启提醒'}">
+                <i data-lucide="${alertOn ? 'bell-ring' : 'bell-off'}" class="w-4 h-4"></i>
+              </button>
+            </span>
           </div>
           <div class="flex justify-between py-2 border-b border-border/50">
             <span class="text-muted text-sm">保质期</span><span class="text-sm">${inv.expiry ? formatCNDateFull(inv.expiry) : '无'}</span>
@@ -3743,6 +3844,7 @@
   async function init() {
     migrateExpenseCategories();
     seedIfNeeded();
+    migrateAlertOptIn();
     reconcileInventoryFromLogs();
     fixHistoricalOutLogDates();
 
