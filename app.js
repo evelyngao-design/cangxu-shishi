@@ -125,8 +125,9 @@
   }
 
   // 把 'YYYY-MM-DD' 按本地时区解析为 Date（避免 new Date('YYYY-MM-DD') 按 UTC 解析导致跨时区偏移）
+  // 注意：对 Date 输入也返回【副本】，绝不能返回原对象，否则 addDays 等会反复修改同一对象造成日期错乱。
   function parseLocalDate(d) {
-    if (d instanceof Date) return d;
+    if (d instanceof Date) return new Date(d.getTime());
     if (typeof d === 'string') {
       const m = d.slice(0, 10).split('-');
       if (m.length === 3 && m[0].length === 4) {
@@ -421,6 +422,14 @@
       }
     });
     if (changed) saveInventory(inv);
+  }
+
+  // 库存页只展示「当前还有」的东西：余量为 0（及以下）的品项从库存中移除。
+  // 商品档案仍保留在商品库（products），下次采购入库会自动再出现；变动日志保留不动。
+  function pruneEmptyInventory() {
+    const inv = getInventory();
+    const kept = inv.filter(i => (parseFloat(i.quantity) || 0) > 0);
+    if (kept.length !== inv.length) saveInventory(kept);
   }
 
   // 一次性校正：历史「饮食消耗」出库日志日期，对齐到对应饮食餐次的日期。
@@ -1609,7 +1618,8 @@
 
   function renderInventory() {
     const cfg = getConfig();
-    let inventory = getInventory();
+    // 库存页只展示当前还有余量的品项（余量 0 的已在保存/启动时清理，这里再兜底过滤）
+    let inventory = getInventory().filter(i => (parseFloat(i.quantity) || 0) > 0);
     const now = new Date(); now.setHours(0,0,0,0);
 
     const expiringItems = inventory.filter(i => i.expiry && daysBetween(now, i.expiry) <= 3 && daysBetween(now, i.expiry) >= 0);
@@ -2290,7 +2300,7 @@
     const base = parseLocalDate(dietSelectedDate);
     const start = addDays(base, -6);
     const days = [];
-    for (let i = 0; i < 14; i++) days.push(addDays(start, i));
+    for (let i = 0; i < 7; i++) days.push(addDays(start, i));
 
     return `
     <div>
@@ -3656,6 +3666,8 @@
     reconcileInventoryFromLogs();
     // 云端可能带回旧日期出库日志，强制再对齐一次到饮食餐次日期
     fixHistoricalOutLogDates(true);
+    // 清理余量为 0 的库存项（商品档案仍保留在商品库）
+    pruneEmptyInventory();
   }
 
   async function afterLogin() {
@@ -3847,6 +3859,7 @@
     migrateAlertOptIn();
     reconcileInventoryFromLogs();
     fixHistoricalOutLogDates();
+    pruneEmptyInventory();
 
     // Setup cloud
     if (window.CloudSync) {
