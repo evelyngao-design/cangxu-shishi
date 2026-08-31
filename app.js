@@ -410,6 +410,66 @@
     if (changed) saveInventory(inv);
   }
 
+  // 一次性校正：历史「饮食消耗」出库日志日期，对齐到对应饮食餐次的日期。
+  // 旧版出库日志盖的是出错的 todayStr()（比实际早一天），与饮食页所选餐次日期不一致。
+  // 以饮食记录（用户实际记录的用餐日期）为准，按商品配对、按时间顺序把出库日志日期改回餐次日期。
+  function fixHistoricalOutLogDates(force) {
+    try {
+      if (!force && localStorage.getItem('cx_outlog_date_fixed_v1')) return;
+      const diet = getDiet();
+      const logs = getInventoryLogs();
+      const inv = getInventory();
+      if (!Array.isArray(logs) || !logs.length) { localStorage.setItem('cx_outlog_date_fixed_v1', '1'); return; }
+
+      const invById = new Map((inv || []).map(i => [i.id, i]));
+      const pkey = (productId, name) => productId ? ('pid:' + productId) : ('name:' + (name || ''));
+      const sortAsc = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+      // 收集来自库存的饮食消耗，按商品分组
+      const consByKey = new Map();
+      (diet || []).forEach(meal => {
+        (meal.items || []).forEach(it => {
+          if (it.source !== 'inventory') return;
+          const invItem = it._inventoryId ? invById.get(it._inventoryId) : null;
+          const key = invItem ? pkey(invItem.productId, invItem.productName) : pkey(it.productId, it.name);
+          if (!consByKey.has(key)) consByKey.set(key, []);
+          consByKey.get(key).push({ date: meal.date, qty: parseFloat(it.quantity) || 0 });
+        });
+      });
+
+      // 出库「饮食消耗」日志按商品分组
+      const logsByKey = new Map();
+      logs.filter(l => l.type === 'out' && l.note === '饮食消耗').forEach(l => {
+        const invItem = invById.get(l.inventoryId);
+        const key = invItem ? pkey(invItem.productId, invItem.productName) : ('inv:' + l.inventoryId);
+        if (!logsByKey.has(key)) logsByKey.set(key, []);
+        logsByKey.get(key).push(l);
+      });
+
+      let changed = false;
+      logsByKey.forEach((lgList, key) => {
+        const cons = consByKey.get(key);
+        if (!cons || !cons.length) return;
+        const consSorted = [...cons].sort(sortAsc);
+        const logsSorted = [...lgList].sort(sortAsc);
+        // 同商品的消耗与出库一一对应，按时间顺序配对
+        const n = Math.min(consSorted.length, logsSorted.length);
+        for (let i = 0; i < n; i++) {
+          if (logsSorted[i].date !== consSorted[i].date) {
+            logsSorted[i].date = consSorted[i].date;
+            changed = true;
+          }
+        }
+      });
+
+      if (changed) saveInventoryLogs(logs);
+      localStorage.setItem('cx_outlog_date_fixed_v1', '1');
+    } catch (e) {
+      console.error('fixHistoricalOutLogDates error', e);
+      localStorage.setItem('cx_outlog_date_fixed_v1', '1');
+    }
+  }
+
   // ==================== ROUTER ====================
   const ROUTES = ['home', 'bookkeeping', 'inventory', 'diet', 'profile', 'products', 'recycle'];
   let currentRoute = 'home';
@@ -3493,6 +3553,8 @@
     }
     // 合并后按本地变动记录校正库存数量，避免云端旧值覆盖造成数量与记录不一致
     reconcileInventoryFromLogs();
+    // 云端可能带回旧日期出库日志，强制再对齐一次到饮食餐次日期
+    fixHistoricalOutLogDates(true);
   }
 
   async function afterLogin() {
@@ -3682,6 +3744,7 @@
     migrateExpenseCategories();
     seedIfNeeded();
     reconcileInventoryFromLogs();
+    fixHistoricalOutLogDates();
 
     // Setup cloud
     if (window.CloudSync) {
