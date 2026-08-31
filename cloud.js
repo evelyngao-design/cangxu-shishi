@@ -166,7 +166,12 @@
 
     try {
       // First delete all existing records for this user (simple full-sync approach)
-      await supabaseClient.from(tableName).delete().eq('user_id', userId);
+      const delRes = await supabaseClient.from(tableName).delete().eq('user_id', userId);
+      // RLS 缺少删除策略时，删除会被静默成 0 行且不报错；这里无法直接区分，
+      // 但如果数据库明确返回错误（如表/列问题），提前抛出更清晰的提示。
+      if (delRes && delRes.error) {
+        throw new Error(`清理旧数据失败：${delRes.error.message || delRes.error}`);
+      }
 
       if (!data || data.length === 0) return;
 
@@ -223,10 +228,21 @@
         return rec;
       });
 
+      // 按主键 id 去重（同 id 保留最后一条），避免批次内重复主键
+      const deduped = [];
+      const seenIds = new Set();
+      for (let i = records.length - 1; i >= 0; i--) {
+        const r = records[i];
+        if (r.id == null || !seenIds.has(r.id)) {
+          if (r.id != null) seenIds.add(r.id);
+          deduped.unshift(r);
+        }
+      }
+
       // Upsert in batches
       const batchSize = 100;
-      for (let i = 0; i < records.length; i += batchSize) {
-        const batch = records.slice(i, i + batchSize);
+      for (let i = 0; i < deduped.length; i += batchSize) {
+        const batch = deduped.slice(i, i + batchSize);
         const { error } = await supabaseClient.from(tableName).insert(batch);
         if (error) {
           console.error(`Push ${tableName} error:`, error);
