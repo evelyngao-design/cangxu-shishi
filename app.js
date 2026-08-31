@@ -45,7 +45,7 @@
     locations: ['冰箱冷藏', '冰箱冷冻', '储物柜', '厨房台面', '浴室', '卧室', '其他'],
     categories: ['蛋奶', '肉类', '蔬果', '粮油调味', '零食饮料', '日用品', '冷冻食品', '其他'],
     units: ['个', 'g', 'ml', '包', '盒', '瓶'],
-    expenseCategories: ['交通出行', '外食餐饮', '日用百货', '居家缴费', '通讯订阅', '医疗健康', '娱乐休闲', '人情社交', '教育学习', '服饰美容', '其他'],
+    expenseCategories: ['交通出行', '外食餐饮', '购物', '生活缴费', '通讯订阅', '医疗健康', '娱乐休闲', '人情社交', '教育学习', '其他'],
     language: 'zh-CN',
     energyUnit: 'kcal',
     weightUnit: 'kg',
@@ -97,6 +97,19 @@
     return { ...DEFAULT_CONFIG, ...cfg };
   }
   function setConfig(cfg) { setData(KEYS.config, cfg); scheduleCloudSync(); }
+
+  // 一次性迁移：把旧版默认的 11 个支出分类替换为新版 10 个（仅当用户未自定义时）
+  function migrateExpenseCategories() {
+    const OLD_DEFAULT = ['交通出行', '外食餐饮', '日用百货', '居家缴费', '通讯订阅', '医疗健康', '娱乐休闲', '人情社交', '教育学习', '服饰美容', '其他'];
+    const raw = getData(KEYS.config, null);
+    if (!raw || !Array.isArray(raw.expenseCategories)) return;
+    const isOldDefault = raw.expenseCategories.length === OLD_DEFAULT.length &&
+      raw.expenseCategories.every((c, i) => c === OLD_DEFAULT[i]);
+    if (isOldDefault) {
+      raw.expenseCategories = [...DEFAULT_CONFIG.expenseCategories];
+      setData(KEYS.config, raw);
+    }
+  }
 
   function todayStr() {
     const d = new Date(); d.setHours(0, 0, 0, 0);
@@ -1068,9 +1081,10 @@
   // ---------- 其他支出（交通等，不进库存/商品/饮食） ----------
   function openExpenseForm(expenseId) {
     const cfg = getConfig();
-    const cats = cfg.expenseCategories && cfg.expenseCategories.length ? cfg.expenseCategories : ['其他'];
+    let cats = cfg.expenseCategories && cfg.expenseCategories.length ? [...cfg.expenseCategories] : ['其他'];
     const isEdit = !!expenseId;
     const ex = isEdit ? getOrders().find(o => o.id === expenseId) : null;
+    if (ex && ex.expenseCategory && !cats.includes(ex.expenseCategory)) cats.push(ex.expenseCategory);
     const data = ex || {
       id: uid(),
       kind: 'expense',
@@ -3613,6 +3627,7 @@
 
   // ---------- INIT ----------
   async function init() {
+    migrateExpenseCategories();
     seedIfNeeded();
 
     // Setup cloud
