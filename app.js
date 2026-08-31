@@ -2477,37 +2477,89 @@
   function renderProducts() {
     const products = getProducts();
     const inventory = getInventory();
+    const cfg = getConfig();
+    const mode = getData('cx_product_group', 'category'); // category | name
+    const stockOf = (p) => inventory.filter(i => i.productId === p.id).reduce((s, i) => s + (i.quantity || 0), 0);
+
+    const card = (p) => `
+      <div class="cx-card p-4">
+        <div class="flex items-start justify-between mb-2">
+          <div class="min-w-0 flex-1">
+            <h4 class="font-medium text-foreground truncate">${esc(p.name)}</h4>
+            <p class="text-xs text-muted">${esc(p.brand || '无品牌')}${mode === 'name' ? ' · ' + esc(p.category || '其他') : ''}</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs mb-2">
+          <div><span class="text-muted">均价</span> <span class="font-medium">${formatMoney(p.defaultPrice || 0)}/${esc(p.unit)}</span></div>
+          <div><span class="text-muted">库存</span> <span class="font-medium">${stockOf(p)}${esc(p.unit)}</span></div>
+        </div>
+        ${p.calories ? `<div class="text-[11px] text-muted">${p.calories}kcal/100g · P${p.protein || 0}g C${p.carbs || 0}g F${p.fat || 0}g</div>` : '<div class="text-[11px] text-muted">暂无营养信息</div>'}
+      </div>`;
+
+    const toggle = `
+      <div class="inline-flex p-1 rounded-xl bg-muted">
+        <button onclick="setProductGroup('category')" class="px-3 py-1.5 text-xs rounded-lg transition-colors ${mode === 'category' ? 'bg-white shadow-sm font-medium text-foreground' : 'text-muted'}">按分类</button>
+        <button onclick="setProductGroup('name')" class="px-3 py-1.5 text-xs rounded-lg transition-colors ${mode === 'name' ? 'bg-white shadow-sm font-medium text-foreground' : 'text-muted'}">按名称</button>
+      </div>`;
+
+    let body;
+    if (products.length === 0) {
+      body = '<div class="cx-card p-8 text-center text-muted">暂无商品，记一笔采购会自动创建</div>';
+    } else if (mode === 'name') {
+      const sorted = [...products].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh'));
+      body = `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">${sorted.map(card).join('')}</div>`;
+    } else {
+      // 按分类分组：分类顺序优先取字典配置，未配置的按拼音排，「其他」永远在最后
+      const groups = new Map();
+      products.forEach(p => {
+        const c = (p.category || '其他').trim() || '其他';
+        if (!groups.has(c)) groups.set(c, []);
+        groups.get(c).push(p);
+      });
+      const catOrder = (cfg.categories || []).map(c => String(c));
+      const orderedCats = [...groups.keys()].sort((a, b) => {
+        if (a === '其他') return 1;
+        if (b === '其他') return -1;
+        const ia = catOrder.indexOf(a), ib = catOrder.indexOf(b);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+        return a.localeCompare(b, 'zh');
+      });
+      body = orderedCats.map(cat => {
+        const list = groups.get(cat).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh'));
+        return `
+        <section class="mb-5">
+          <div class="flex items-center gap-2 mb-2.5">
+            <span class="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <i data-lucide="tag" class="w-4 h-4 text-primary"></i>${esc(cat)}
+            </span>
+            <span class="text-xs text-muted">${list.length}</span>
+            <span class="flex-1 h-px bg-border"></span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">${list.map(card).join('')}</div>
+        </section>`;
+      }).join('');
+    }
+
     return `
     <div>
-      <div class="flex items-center justify-between mb-5">
+      <div class="flex items-center justify-between mb-5 gap-3">
         <div>
           <h3 class="text-lg font-semibold text-foreground">商品库</h3>
           <p class="text-sm text-muted">共 ${products.length} 种商品</p>
         </div>
+        ${products.length > 0 ? toggle : ''}
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        ${products.length === 0 ? '<div class="cx-card p-8 text-center text-muted col-span-full">暂无商品，记一笔采购会自动创建</div>' :
-          products.map(p => {
-            const stock = inventory.filter(i => i.productId === p.id).reduce((s,i) => s+i.quantity, 0);
-            return `
-            <div class="cx-card p-4">
-              <div class="flex items-start justify-between mb-2">
-                <div class="min-w-0 flex-1">
-                  <h4 class="font-medium text-foreground truncate">${esc(p.name)}</h4>
-                  <p class="text-xs text-muted">${esc(p.brand||'无品牌')} · ${esc(p.category||'其他')}</p>
-                </div>
-              </div>
-              <div class="grid grid-cols-2 gap-2 text-xs mb-2">
-                <div><span class="text-muted">均价</span> <span class="font-medium">${formatMoney(p.defaultPrice||0)}/${esc(p.unit)}</span></div>
-                <div><span class="text-muted">库存</span> <span class="font-medium">${stock}${esc(p.unit)}</span></div>
-              </div>
-              ${p.calories ? `<div class="text-[11px] text-muted">${p.calories}kcal/100g · P${p.protein||0}g C${p.carbs||0}g F${p.fat||0}g</div>` : '<div class="text-[11px] text-muted">暂无营养信息</div>'}
-            </div>`;
-          }).join('')}
-      </div>
+      ${body}
     </div>
     `;
   }
+
+  window.setProductGroup = function (mode) {
+    setData('cx_product_group', mode);
+    render();
+  };
 
   // ---------- PROFILE ----------
   function renderProfile() {
