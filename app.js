@@ -111,29 +111,48 @@
     }
   }
 
+  // 把 'YYYY-MM-DD' 按本地时区解析为 Date（避免 new Date('YYYY-MM-DD') 按 UTC 解析导致跨时区偏移）
+  function parseLocalDate(d) {
+    if (d instanceof Date) return d;
+    if (typeof d === 'string') {
+      const m = d.slice(0, 10).split('-');
+      if (m.length === 3 && m[0].length === 4) {
+        return new Date(+m[0], +m[1] - 1, +m[2]);
+      }
+      return new Date(d);
+    }
+    return new Date(d);
+  }
+  // 按本地时区格式化为 'YYYY-MM-DD'（不能用 toISOString，那是 UTC，UTC+8 会早一天）
+  function toDateStr(d) {
+    const dt = parseLocalDate(d);
+    if (isNaN(dt.getTime())) return '';
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
   function todayStr() {
-    const d = new Date(); d.setHours(0, 0, 0, 0);
-    return d.toISOString().slice(0, 10);
+    return toDateStr(new Date());
   }
   function dateStr(d) {
-    const dt = (typeof d === 'string') ? new Date(d) : d;
-    return dt.toISOString().slice(0, 10);
+    return toDateStr(d);
   }
   function formatCNDate(d) {
-    const dt = (typeof d === 'string') ? new Date(d) : d;
+    const dt = parseLocalDate(d);
     return `${dt.getMonth() + 1}月${dt.getDate()}日`;
   }
   function formatCNDateFull(d) {
-    const dt = (typeof d === 'string') ? new Date(d) : d;
+    const dt = parseLocalDate(d);
     return `${dt.getFullYear()}年${dt.getMonth() + 1}月${dt.getDate()}日`;
   }
   function daysBetween(d1, d2) {
-    const a = new Date(d1); a.setHours(0,0,0,0);
-    const b = new Date(d2); b.setHours(0,0,0,0);
+    const a = parseLocalDate(d1); a.setHours(0,0,0,0);
+    const b = parseLocalDate(d2); b.setHours(0,0,0,0);
     return Math.round((b - a) / 86400000);
   }
   function addDays(d, n) {
-    const dt = new Date(d); dt.setDate(dt.getDate() + n); return dt;
+    const dt = parseLocalDate(d); dt.setDate(dt.getDate() + n); return dt;
   }
 
   function formatMoney(amount, currency) {
@@ -359,6 +378,36 @@
       addInventoryLog(newItem.id, 'in', quantity, '新增入库', todayStr());
       return newItem;
     }
+  }
+
+  // 根据变动记录校正库存数量：所有入库/出库/调整日志的带符号数量之和 = 应有库存。
+  // 仅对存在「入库」基线日志的商品生效；用于修复数量与变动记录不一致（如云同步覆盖等）。
+  function reconcileInventoryFromLogs() {
+    const inv = getInventory();
+    const logs = getInventoryLogs();
+    if (!Array.isArray(logs) || logs.length === 0 || !Array.isArray(inv) || inv.length === 0) return;
+
+    const sumById = new Map();
+    const hasInById = new Set();
+    logs.forEach(l => {
+      if (!l || !l.inventoryId) return;
+      const q = parseFloat(l.quantity) || 0;
+      sumById.set(l.inventoryId, (sumById.get(l.inventoryId) || 0) + q);
+      if (l.type === 'in') hasInById.add(l.inventoryId);
+    });
+
+    let changed = false;
+    inv.forEach(item => {
+      if (!hasInById.has(item.id)) return;          // 无入库基线（如演示数据），保持不动
+      const computed = sumById.get(item.id);
+      if (computed == null || computed < 0) return;  // 异常值不动
+      const rounded = Math.round(computed * 1000) / 1000;
+      if (Math.abs((parseFloat(item.quantity) || 0) - rounded) > 1e-6) {
+        item.quantity = rounded;
+        changed = true;
+      }
+    });
+    if (changed) saveInventory(inv);
   }
 
   // ==================== ROUTER ====================
@@ -2077,7 +2126,7 @@
 
     const displayCal = (kcal) => cfg.energyUnit === 'kJ' ? Math.round(kcal * KCAL_TO_KJ) : Math.round(kcal);
 
-    const base = new Date(dietSelectedDate);
+    const base = parseLocalDate(dietSelectedDate);
     const start = addDays(base, -6);
     const days = [];
     for (let i = 0; i < 14; i++) days.push(addDays(start, i));
@@ -2550,7 +2599,8 @@
     const invItem = inv.find(i => i.id === invId);
     if (invItem && !isEdit) {
       invItem.quantity -= grams;
-      addInventoryLog(invId, 'out', -grams, '饮食消耗', todayStr());
+      // 出库日期取这一餐所属的日期（dietSelectedDate），与实际食用日期一致
+      addInventoryLog(invId, 'out', -grams, '饮食消耗', dietSelectedDate);
       if (invItem.quantity <= 0) {
         inv = inv.filter(i => i.id !== invId);
       }
@@ -3441,6 +3491,8 @@
     if (cloudData.config && typeof cloudData.config === 'object') {
       setData(KEYS.config, { ...DEFAULT_CONFIG, ...getData(KEYS.config, {}), ...cloudData.config });
     }
+    // 合并后按本地变动记录校正库存数量，避免云端旧值覆盖造成数量与记录不一致
+    reconcileInventoryFromLogs();
   }
 
   async function afterLogin() {
@@ -3629,6 +3681,7 @@
   async function init() {
     migrateExpenseCategories();
     seedIfNeeded();
+    reconcileInventoryFromLogs();
 
     // Setup cloud
     if (window.CloudSync) {
