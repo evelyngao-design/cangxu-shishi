@@ -45,6 +45,7 @@
     locations: ['冰箱冷藏', '冰箱冷冻', '储物柜', '厨房台面', '浴室', '卧室', '其他'],
     categories: ['蛋奶', '肉类', '蔬果', '粮油调味', '零食饮料', '日用品', '冷冻食品', '其他'],
     units: ['个', 'g', 'ml', '包', '盒', '瓶'],
+    expenseCategories: ['交通出行', '外食餐饮', '日用百货', '居家缴费', '通讯订阅', '医疗健康', '娱乐休闲', '人情社交', '教育学习', '服饰美容', '其他'],
     language: 'zh-CN',
     energyUnit: 'kcal',
     weightUnit: 'kg',
@@ -667,20 +668,24 @@
           </div>
           <div class="space-y-3">
             ${recentOrders.length === 0 ? '<p class="text-sm text-muted text-center py-4">暂无记录</p>' :
-              recentOrders.map(o => `
-                <div class="flex items-center justify-between p-3 rounded-xl bg-white border border-border cursor-pointer hover:border-primary/40 transition-colors" onclick="openOrderForm('${o.id}')">
+              recentOrders.map(o => {
+                const isExp = o.kind === 'expense';
+                const openFn = isExp ? `openExpenseForm('${o.id}')` : `openOrderForm('${o.id}')`;
+                return `
+                <div class="flex items-center justify-between p-3 rounded-xl bg-white border border-border cursor-pointer hover:border-primary/40 transition-colors" onclick="${openFn}">
                   <div class="flex items-center gap-3 min-w-0 flex-1">
-                    <div class="w-9 h-9 rounded-lg bg-pink-100 text-pink-500 flex items-center justify-center flex-shrink-0">
-                      <i data-lucide="shopping-bag" class="w-4 h-4"></i>
+                    <div class="w-9 h-9 rounded-lg ${isExp ? 'bg-taro-100 text-taro-600' : 'bg-pink-100 text-pink-500'} flex items-center justify-center flex-shrink-0">
+                      <i data-lucide="${isExp ? 'wallet' : 'shopping-bag'}" class="w-4 h-4"></i>
                     </div>
                     <div class="min-w-0 flex-1">
-                      <p class="text-sm font-medium text-foreground truncate">${esc(o.channel)}</p>
-                      <p class="text-xs text-muted truncate">${formatCNDate(o.date)} · ${o.items.length}件商品</p>
+                      <p class="text-sm font-medium text-foreground truncate">${esc(isExp ? (o.expenseCategory || '其他支出') : o.channel)}</p>
+                      <p class="text-xs text-muted truncate">${formatCNDate(o.date)} · ${isExp ? '支出' : o.items.length + '件商品'}</p>
                     </div>
                   </div>
                   <span class="text-sm font-semibold text-foreground ml-2 flex-shrink-0">-${formatMoney(o.total, o.currency)}</span>
                 </div>
-              `).join('')}
+                `;
+              }).join('')}
           </div>
         </div>
 
@@ -713,31 +718,48 @@
   }
 
   // ---------- BOOKKEEPING ----------
-  let bkFilters = { range: 'month', channel: '', payment: '', search: '' };
+  let bkFilters = { range: 'month', kind: '', channel: '', payment: '', search: '' };
 
   function renderBookkeeping() {
     const orders = getOrders();
     const cfg = getConfig();
 
-    let filtered = [...orders];
+    let inRange = [...orders];
     const now = new Date();
     if (bkFilters.range === 'today') {
-      filtered = filtered.filter(o => o.date === todayStr());
+      inRange = inRange.filter(o => o.date === todayStr());
     } else if (bkFilters.range === 'week') {
       const weekAgo = dateStr(addDays(now, -7));
-      filtered = filtered.filter(o => o.date >= weekAgo);
+      inRange = inRange.filter(o => o.date >= weekAgo);
     } else if (bkFilters.range === 'month') {
       const monthStart = dateStr(new Date(now.getFullYear(), now.getMonth(), 1));
-      filtered = filtered.filter(o => o.date >= monthStart);
+      inRange = inRange.filter(o => o.date >= monthStart);
     }
+
+    // 支出构成（按当前时间范围统计，不受下方类型/渠道筛选影响）
+    const orderKind = (o) => (o.kind === 'expense' ? 'expense' : 'grocery');
+    const compMap = new Map();
+    inRange.forEach(o => {
+      const key = orderKind(o) === 'expense' ? ('支出·' + (o.expenseCategory || '其他')) : '食材采购';
+      compMap.set(key, (compMap.get(key) || 0) + (parseFloat(o.total) || 0));
+    });
+    const compTotal = [...compMap.values()].reduce((s, v) => s + v, 0) || 1;
+    const compRows = [...compMap.entries()]
+      .map(([label, amount]) => ({ label, amount, pct: amount / compTotal }))
+      .sort((a, b) => b.amount - a.amount);
+    const COMP_COLORS = ['bg-primary', 'bg-pink-500', 'bg-taro-600', 'bg-mint-600', 'bg-cream-600', 'bg-muted'];
+
+    let filtered = inRange;
+    if (bkFilters.kind) filtered = filtered.filter(o => orderKind(o) === bkFilters.kind);
     if (bkFilters.channel) filtered = filtered.filter(o => o.channel === bkFilters.channel);
     if (bkFilters.payment) filtered = filtered.filter(o => o.payment === bkFilters.payment);
     if (bkFilters.search) {
       const q = bkFilters.search.toLowerCase();
       filtered = filtered.filter(o =>
-        o.channel.toLowerCase().includes(q) ||
-        o.note.toLowerCase().includes(q) ||
-        o.items.some(i => i.productName.toLowerCase().includes(q))
+        (o.channel || '').toLowerCase().includes(q) ||
+        (o.note || '').toLowerCase().includes(q) ||
+        (o.expenseCategory || '').toLowerCase().includes(q) ||
+        (o.items || []).some(i => (i.productName || '').toLowerCase().includes(q))
       );
     }
 
@@ -772,12 +794,34 @@
         </div>
       </div>
 
+      ${compRows.length ? `
+      <div class="cx-card p-4 mb-5">
+        <p class="text-xs text-muted mb-3">支出构成（当前时间范围）</p>
+        <div class="flex h-2.5 rounded-full overflow-hidden mb-3 bg-muted">
+          ${compRows.map((r, i) => `<div class="${COMP_COLORS[i % COMP_COLORS.length]}" style="width:${(r.pct * 100).toFixed(1)}%"></div>`).join('')}
+        </div>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          ${compRows.map((r, i) => `
+            <div class="flex items-center gap-2 text-xs min-w-0">
+              <span class="w-2.5 h-2.5 rounded-sm flex-none ${COMP_COLORS[i % COMP_COLORS.length]}"></span>
+              <span class="text-muted truncate">${esc(r.label.replace('支出·', ''))}</span>
+              <span class="ml-auto font-medium text-foreground whitespace-nowrap">${formatMoney(r.amount)}</span>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+
       <div class="cx-card p-4 mb-5">
         <div class="flex flex-wrap gap-2 mb-3">
           ${['today','week','month','all'].map(r => {
             const labels = { today: '今天', week: '本周', month: '本月', all: '全部' };
             const active = bkFilters.range === r;
             return `<button onclick="setBkFilter('range','${r}')" class="cx-btn cx-btn-sm ${active ? 'cx-btn-primary' : 'cx-btn-secondary'}">${labels[r]}</button>`;
+          }).join('')}
+        </div>
+        <div class="flex flex-wrap gap-2 mb-3">
+          ${[['','全部'],['grocery','采购'],['expense','支出']].map(([val,label]) => {
+            const active = bkFilters.kind === val;
+            return `<button onclick="setBkFilter('kind','${val}')" class="cx-btn cx-btn-sm ${active ? 'cx-btn-primary' : 'cx-btn-secondary'}">${label}</button>`;
           }).join('')}
         </div>
         <div class="flex flex-wrap gap-2 items-center">
@@ -790,14 +834,19 @@
             ${cfg.payments.map(p => `<option value="${esc(p)}" ${bkFilters.payment===p?'selected':''}>${esc(p)}</option>`).join('')}
           </select>
           <input type="text" placeholder="搜索..." value="${esc(bkFilters.search)}" oninput="setBkFilter('search', this.value)" class="cx-input cx-input-sm flex-1 min-w-[120px]">
-          <button onclick="openOrderForm()" class="cx-btn cx-btn-primary cx-btn-sm ml-auto">
-            <i data-lucide="plus" class="w-4 h-4"></i> 新增采购
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button onclick="openOrderForm()" class="cx-btn cx-btn-primary cx-btn-sm flex-1">
+            <i data-lucide="shopping-cart" class="w-4 h-4"></i> 记采购
+          </button>
+          <button onclick="openExpenseForm()" class="cx-btn cx-btn-sm flex-1" style="background:var(--cangxu-primary-100);color:var(--cangxu-primary-700)">
+            <i data-lucide="wallet" class="w-4 h-4"></i> 记一笔支出
           </button>
         </div>
       </div>
 
       <div class="space-y-4">
-        ${groupDates.length === 0 ? '<div class="cx-card p-8 text-center text-muted">暂无采购记录，点击"新增采购"开始记账</div>' :
+        ${groupDates.length === 0 ? '<div class="cx-card p-8 text-center text-muted">暂无记录，点击「记采购」或「记一笔支出」开始记账</div>' :
           groupDates.map(d => `
             <div>
               <div class="flex items-center gap-2 mb-2 px-1">
@@ -815,6 +864,38 @@
   }
 
   function renderOrderCard(o) {
+    const isExpense = o.kind === 'expense';
+    if (isExpense) {
+      return `
+      <details class="cx-card overflow-hidden group">
+        <summary class="p-4 flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-taro-100 text-taro-600 flex items-center justify-center flex-shrink-0">
+            <i data-lucide="wallet" class="w-5 h-5"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-medium text-foreground">${esc(o.expenseCategory || '其他支出')}</span>
+              <span class="cx-tag cx-tag-taro" style="font-size:10px;padding:1px 6px">支出</span>
+              <span class="cx-tag cx-tag-gray">${esc(o.payment || '')}</span>
+            </div>
+            <p class="text-xs text-muted mt-0.5 truncate">${esc(o.note || '无备注')}</p>
+          </div>
+          <span class="font-semibold text-foreground mr-2">${formatMoney(o.total, o.currency)}</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 text-muted transition-transform group-open:rotate-180"></i>
+        </summary>
+        <div class="px-4 pb-4 pt-0 border-t border-border/50">
+          <div class="flex gap-2 mt-3 pt-3 border-t border-border/50">
+            <button onclick="event.preventDefault();event.stopPropagation();openExpenseForm('${o.id}')" class="cx-btn cx-btn-sm cx-btn-secondary">
+              <i data-lucide="edit-2" class="w-3.5 h-3.5"></i> 编辑
+            </button>
+            <button onclick="event.preventDefault();event.stopPropagation();deleteOrder('${o.id}')" class="cx-btn cx-btn-sm cx-btn-ghost text-error-text">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 删除
+            </button>
+          </div>
+        </div>
+      </details>
+      `;
+    }
     return `
     <details class="cx-card overflow-hidden group">
       <summary class="p-4 flex items-center gap-3">
@@ -841,7 +922,6 @@
                 ${it.brand ? `<span class="text-muted ml-1 text-xs">(${esc(it.brand)})</span>` : ''}
                 <span class="text-muted ml-2">×${it.quantity}${esc(it.unit)}</span>
                 ${it.toInventory ? '<span class="cx-tag cx-tag-mint ml-1" style="font-size:10px;padding:1px 6px">入库</span>' : ''}
-                ${it.toDiet ? `<span class="cx-tag cx-tag-cream ml-1" style="font-size:10px;padding:1px 6px">${it.meal ? esc(MEAL_NAMES[it.meal]) : '待分配'}</span>` : ''}
               </div>
               <span class="text-muted">${formatMoney(it.subtotal != null ? it.subtotal : (it.unitPrice * it.quantity), o.currency)}</span>
             </div>
@@ -984,6 +1064,102 @@
     });
   }
   window.openOrderForm = openOrderForm;
+
+  // ---------- 其他支出（交通等，不进库存/商品/饮食） ----------
+  function openExpenseForm(expenseId) {
+    const cfg = getConfig();
+    const cats = cfg.expenseCategories && cfg.expenseCategories.length ? cfg.expenseCategories : ['其他'];
+    const isEdit = !!expenseId;
+    const ex = isEdit ? getOrders().find(o => o.id === expenseId) : null;
+    const data = ex || {
+      id: uid(),
+      kind: 'expense',
+      date: todayStr(),
+      expenseCategory: cats[0],
+      payment: cfg.payments[0],
+      currency: cfg.defaultCurrency || 'HKD',
+      note: '',
+      total: 0,
+      items: [],
+      tags: []
+    };
+    window._expenseData = data;
+
+    openModal(`
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-foreground">${isEdit ? '编辑支出' : '记一笔支出'}</h3>
+          <button onclick="closeModal()" class="w-9 h-9 -mr-2 -mt-1 rounded-full hover:bg-muted flex items-center justify-center text-muted" aria-label="关闭">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <form id="expense-form" onsubmit="submitExpense(event)">
+          <input type="hidden" name="id" value="${data.id}">
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label class="text-xs text-muted block mb-1">日期</label>
+              <input type="date" name="date" value="${data.date}" class="cx-input w-full" required>
+            </div>
+            <div>
+              <label class="text-xs text-muted block mb-1">支出分类</label>
+              <select name="expenseCategory" class="cx-input w-full">
+                ${cats.map(c => `<option value="${esc(c)}" ${data.expenseCategory === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-muted block mb-1">金额</label>
+              <input type="number" inputmode="decimal" step="0.01" min="0" name="total" value="${data.total || ''}" class="cx-input w-full" placeholder="0.00" required>
+            </div>
+            <div>
+              <label class="text-xs text-muted block mb-1">支付方式</label>
+              <select name="payment" class="cx-input w-full">
+                ${cfg.payments.map(p => `<option value="${esc(p)}" ${data.payment === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="mb-4">
+            <label class="text-xs text-muted block mb-1">备注</label>
+            <input type="text" name="note" value="${esc(data.note || '')}" class="cx-input w-full" placeholder="可选，如：地铁通勤、打车去机场">
+          </div>
+          <p class="text-[11px] text-muted mb-4 leading-relaxed">其他支出只计入支出统计，不会进入库存、商品库或饮食记录。分类可在「我的 → 字典管理 → 支出分类」里维护。</p>
+          <div class="sticky-submit-bar">
+            <div class="flex gap-3 justify-end">
+              <button type="button" onclick="closeModal()" class="cx-btn cx-btn-secondary">取消</button>
+              <button type="submit" class="cx-btn cx-btn-primary">${isEdit ? '保存修改' : '保存'}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    `);
+  }
+  window.openExpenseForm = openExpenseForm;
+
+  window.submitExpense = function (e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = window._expenseData;
+    if (!data) return;
+    data.kind = 'expense';
+    data.date = form.date.value;
+    data.expenseCategory = form.expenseCategory.value;
+    data.payment = form.payment.value;
+    data.note = form.note.value;
+    data.total = parseFloat(form.total.value) || 0;
+    data.items = [];
+    data.channel = '';
+    data.createdAt = new Date().toISOString();
+
+    if (!data.date) { toast('请选择日期'); return; }
+    if (data.total <= 0) { toast('请填写金额'); return; }
+
+    const orders = getOrders();
+    const idx = orders.findIndex(o => o.id === data.id);
+    if (idx >= 0) orders[idx] = data; else orders.push(data);
+    saveOrders(orders);
+    closeModal();
+    toast(idx >= 0 ? '已更新支出' : '已记一笔支出');
+    render();
+  };
 
   function orderItemRow(it, idx, products, cfg) {
     const autoSubtotal = (parseFloat(it.unitPrice)||0) * (parseFloat(it.quantity)||0);
@@ -1248,6 +1424,23 @@
     const orders = getOrders();
     const o = orders.find(x => x.id === id);
     if (!o) return;
+    const isExpense = o.kind === 'expense';
+    if (isExpense) {
+      confirmDialog(
+        '删除支出记录',
+        `确定删除这笔「${o.expenseCategory || '其他支出'}」${formatMoney(o.total, o.currency)} 吗？\n\n记录将移至回收站，可恢复。`,
+        () => {
+          const recycle = getRecycle();
+          recycle.push({ id: uid(), type: 'order', data: JSON.parse(JSON.stringify(o)), deletedAt: new Date().toISOString() });
+          saveRecycle(recycle);
+          saveOrders(orders.filter(x => x.id !== id));
+          toast('已移至回收站');
+          render();
+        },
+        { danger: true, confirmText: '删除' }
+      );
+      return;
+    }
     const invCount = o.items.filter(i => i.toInventory).length;
     confirmDialog(
       '删除采购记录',
@@ -2631,6 +2824,7 @@
             ['payments','支付方式','credit-card'],
             ['locations','存放位置','map-pin'],
             ['categories','商品分类','tag'],
+            ['expenseCategories','支出分类','wallet'],
             ['units','计量单位','ruler']
           ].map(([key,label,icon]) => `
             <button onclick="openDictManager('${key}')" class="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors">
@@ -2884,6 +3078,7 @@
     payments:   { title: '支付方式', placeholder: '如：支付宝HK、八达通' },
     locations:  { title: '存放位置', placeholder: '如：冰箱冷藏、储物柜' },
     categories: { title: '商品分类', placeholder: '如：零食饮料、日用品' },
+    expenseCategories: { title: '支出分类', placeholder: '如：交通出行、外食餐饮' },
     units:      { title: '计量单位', placeholder: '如：片、袋、罐、瓶' }
   };
 
@@ -3062,7 +3257,7 @@
           ${recycle.map(r => `
             <div class="cx-card p-4 flex items-center justify-between">
               <div>
-                <p class="font-medium">${r.type === 'order' ? '采购记录' : r.type === 'inventory' ? '库存项' : r.type}</p>
+                <p class="font-medium">${r.type === 'order' ? (r.data && r.data.kind === 'expense' ? '支出记录' : '采购记录') : r.type === 'inventory' ? '库存项' : r.type}</p>
                 <p class="text-xs text-muted">删除于 ${formatCNDateFull(r.deletedAt?.slice(0,10) || todayStr())}</p>
               </div>
               <div class="flex gap-2">

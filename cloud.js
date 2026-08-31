@@ -197,7 +197,9 @@
         }
         // Convert camelCase to snake_case for JSON fields that are objects
         if (tableName === 'orders') {
-          // items and tags are already JSON, field names match
+          // items and tags are already JSON；支出单类型与分类需要独立列
+          rec.kind = item.kind === 'expense' ? 'expense' : 'grocery';
+          rec.expense_category = item.expenseCategory || '';
         }
         if (tableName === 'diet') {
           // items is JSON, totalCalories -> total_calories
@@ -327,6 +329,11 @@
           if (tableName === 'diet') {
             item.totalCalories = rec.total_calories || 0;
             delete item.total_calories;
+          }
+          if (tableName === 'orders') {
+            item.kind = rec.kind === 'expense' ? 'expense' : 'grocery';
+            item.expenseCategory = rec.expense_category || '';
+            delete item.expense_category;
           }
           if (tableName === 'products') {
             item.defaultPrice = rec.default_price || 0;

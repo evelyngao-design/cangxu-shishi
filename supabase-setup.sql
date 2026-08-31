@@ -38,6 +38,8 @@ create table if not exists public.orders (
   currency text default 'HKD',
   note text default '',
   tags jsonb default '[]'::jsonb,
+  kind text default 'grocery',
+  expense_category text default '',
   items jsonb default '[]'::jsonb,
   total numeric default 0,
   created_at timestamptz default now()
