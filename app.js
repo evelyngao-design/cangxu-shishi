@@ -2298,7 +2298,9 @@
     const displayCal = (kcal) => cfg.energyUnit === 'kJ' ? Math.round(kcal * KCAL_TO_KJ) : Math.round(kcal);
 
     const base = parseLocalDate(dietSelectedDate);
-    const start = addDays(base, -6);
+    // 日期条按「周一到周日」整周排布：定位到所选日期所在那一周的周一
+    const mondayOffset = (base.getDay() + 6) % 7; // 周一=0 … 周日=6
+    const start = addDays(base, -mondayOffset);
     const days = [];
     for (let i = 0; i < 7; i++) days.push(addDays(start, i));
 
