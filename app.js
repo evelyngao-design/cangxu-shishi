@@ -49,7 +49,8 @@
     language: 'zh-CN',
     energyUnit: 'kcal',
     weightUnit: 'kg',
-    defaultCurrency: 'HKD'
+    defaultCurrency: 'HKD',
+    cnyToHkd: 1.08
   };
 
   const MEAL_NAMES = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', snack: '加餐' };
@@ -173,6 +174,26 @@
     const cur = currency || getConfig().defaultCurrency || 'HKD';
     const sym = cur === 'CNY' ? '¥' : 'HK$';
     return sym + parseFloat(amount || 0).toFixed(2);
+  }
+
+  // 汇率：1 CNY = 多少 HKD，以 HKD 为基准币种；非法/缺失时回退默认值
+  function getCnyToHkd() {
+    const r = parseFloat(getConfig().cnyToHkd);
+    return (isNaN(r) || r <= 0) ? 1.08 : r;
+  }
+  // 单笔订单实时折算为 HKD（不落地存储，汇率始终现读）
+  function orderHkd(o) {
+    const amt = parseFloat(o && o.total) || 0;
+    return (o && o.currency === 'CNY') ? amt * getCnyToHkd() : amt;
+  }
+  // HKD 金额折算到目标展示币种并格式化（仅在最终展示时取舍）
+  function formatMoneyHkd(amountHkd, currency) {
+    const cur = currency || getConfig().defaultCurrency || 'HKD';
+    const v = cur === 'CNY' ? amountHkd / getCnyToHkd() : amountHkd;
+    return formatMoney(v, cur);
+  }
+  function fxNoteText() {
+    return '按当前汇率 1 CNY ≈ ' + getCnyToHkd() + ' HKD 折算';
   }
 
   // 单位成本自适应精度（小价格保留更多小数）
@@ -692,7 +713,7 @@
     const today = todayStr();
 
     const todayOrders = orders.filter(o => o.date === today);
-    const todaySpending = todayOrders.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
+    const todaySpending = todayOrders.reduce((s, o) => s + orderHkd(o), 0);
     const todayDiet = diet.filter(d => d.date === today);
     const todayCalories = todayDiet.reduce((s, m) => s + (m.totalCalories || 0), 0);
     const latestBody = latestBodyRecord(body);
@@ -720,7 +741,7 @@
         <div class="cx-card p-5 flex items-center justify-between">
           <div>
             <p class="text-sm text-muted mb-1">今日支出</p>
-            <p class="text-2xl font-bold text-foreground">${formatMoney(todaySpending)}</p>
+            <p class="text-2xl font-bold text-foreground">${formatMoneyHkd(todaySpending)}</p>
             <p class="text-xs text-muted mt-1">${todayOrders.length} 笔采购</p>
           </div>
           <div class="w-12 h-12 rounded-2xl bg-pink-100 text-pink-500 flex items-center justify-center">
@@ -785,7 +806,7 @@
       <section class="cx-card p-5 mb-6">
         <h2 class="text-base font-semibold text-foreground mb-4">快捷操作</h2>
         <div class="grid grid-cols-3 gap-3">
-          <button onclick="openOrderForm()" class="flex flex-col items-center gap-2 p-4 rounded-2xl bg-primary/10 text-primary hover:bg-primary/15 transition-colors">
+          <button onclick="pickBookkeepingType()" class="flex flex-col items-center gap-2 p-4 rounded-2xl bg-primary/10 text-primary hover:bg-primary/15 transition-colors">
             <i data-lucide="plus-circle" class="w-6 h-6"></i>
             <span class="text-sm font-medium">记一笔</span>
           </button>
@@ -881,7 +902,7 @@
     const compMap = new Map();
     inRange.forEach(o => {
       const key = orderKind(o) === 'expense' ? ('支出·' + (o.expenseCategory || '其他')) : '食材采购';
-      compMap.set(key, (compMap.get(key) || 0) + (parseFloat(o.total) || 0));
+      compMap.set(key, (compMap.get(key) || 0) + orderHkd(o));
     });
     const compTotal = [...compMap.values()].reduce((s, v) => s + v, 0) || 1;
     const compRows = [...compMap.entries()]
@@ -905,7 +926,7 @@
 
     filtered.sort((a,b) => b.date.localeCompare(a.date) || (b.createdAt||'').localeCompare(a.createdAt||''));
 
-    const totalSpending = filtered.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
+    const totalSpending = filtered.reduce((s, o) => s + orderHkd(o), 0);
     const orderCount = filtered.length;
     const daysSet = new Set(filtered.map(o => o.date));
     const dailyAvg = daysSet.size > 0 ? totalSpending / daysSet.size : 0;
@@ -919,10 +940,10 @@
 
     return `
     <div>
-      <div class="grid grid-cols-3 gap-3 mb-5">
+      <div class="grid grid-cols-3 gap-3 mb-2">
         <div class="cx-card p-4">
           <p class="text-xs text-muted mb-1">总支出</p>
-          <p class="text-xl font-bold text-foreground">${formatMoney(totalSpending)}</p>
+          <p class="text-xl font-bold text-foreground">${formatMoneyHkd(totalSpending)}</p>
         </div>
         <div class="cx-card p-4">
           <p class="text-xs text-muted mb-1">笔数</p>
@@ -930,9 +951,10 @@
         </div>
         <div class="cx-card p-4">
           <p class="text-xs text-muted mb-1">日均</p>
-          <p class="text-xl font-bold text-foreground">${formatMoney(dailyAvg)}</p>
+          <p class="text-xl font-bold text-foreground">${formatMoneyHkd(dailyAvg)}</p>
         </div>
       </div>
+      <p class="text-[11px] text-muted mb-4 px-1">${fxNoteText()}</p>
 
       ${compRows.length ? `
       <div class="cx-card p-4 mb-5">
@@ -945,7 +967,7 @@
             <div class="flex items-center gap-2 text-xs min-w-0">
               <span class="w-2.5 h-2.5 rounded-sm flex-none ${COMP_COLORS[i % COMP_COLORS.length]}"></span>
               <span class="text-muted truncate">${esc(r.label.replace('支出·', ''))}</span>
-              <span class="ml-auto font-medium text-foreground whitespace-nowrap">${formatMoney(r.amount)}</span>
+              <span class="ml-auto font-medium text-foreground whitespace-nowrap">${formatMoneyHkd(r.amount)}</span>
             </div>`).join('')}
         </div>
       </div>` : ''}
@@ -991,7 +1013,7 @@
             <div>
               <div class="flex items-center gap-2 mb-2 px-1">
                 <span class="text-sm font-medium text-foreground">${formatCNDateFull(d)}</span>
-                <span class="text-xs text-muted">${groups[d].length} 笔 · ${formatMoney(groups[d].reduce((s,o)=>s+(+o.total||0),0))}</span>
+                <span class="text-xs text-muted">${groups[d].length} 笔 · ${formatMoneyHkd(groups[d].reduce((s,o)=>s+orderHkd(o),0))}</span>
               </div>
               <div class="space-y-2">
                 ${groups[d].map(o => renderOrderCard(o)).join('')}
@@ -1248,7 +1270,13 @@
               </select>
             </div>
             <div>
-              <label class="text-xs text-muted block mb-1">金额</label>
+              <label class="text-xs text-muted block mb-1">
+                <span>金额</span>
+                <select name="currency" class="float-right text-xs bg-transparent border-0 p-0 h-auto font-medium text-foreground focus:ring-0 cursor-pointer">
+                  <option value="HKD" ${data.currency==='CNY'?'':'selected'}>HKD (HK$)</option>
+                  <option value="CNY" ${data.currency==='CNY'?'selected':''}>CNY (¥)</option>
+                </select>
+              </label>
               <input type="number" inputmode="decimal" step="0.01" min="0" name="total" value="${data.total || ''}" class="cx-input w-full" placeholder="0.00" required>
             </div>
             <div>
@@ -1275,6 +1303,40 @@
   }
   window.openExpenseForm = openExpenseForm;
 
+  // 首页「记一笔」：先选记账类型，再进入对应表单
+  window.pickBookkeepingType = function () {
+    openModal(`
+      <div class="p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-foreground">选择记账类型</h3>
+          <button onclick="closeModal()" class="w-9 h-9 -mr-2 -mt-1 rounded-full hover:bg-muted flex items-center justify-center text-muted" aria-label="关闭">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <div class="space-y-3">
+          <button onclick="closeModal();openOrderForm()" class="w-full flex items-center gap-3 p-4 rounded-2xl bg-primary/10 hover:bg-primary/15 transition-colors text-left" style="min-height:48px">
+            <span class="w-10 h-10 rounded-xl bg-white/70 text-primary flex items-center justify-center flex-shrink-0">
+              <i data-lucide="shopping-cart" class="w-5 h-5"></i>
+            </span>
+            <span class="min-w-0">
+              <span class="block text-sm font-medium text-foreground">记采购</span>
+              <span class="block text-xs text-muted">采购食材，保存后自动入库</span>
+            </span>
+          </button>
+          <button onclick="closeModal();openExpenseForm()" class="w-full flex items-center gap-3 p-4 rounded-2xl bg-muted/60 hover:bg-muted transition-colors text-left" style="min-height:48px">
+            <span class="w-10 h-10 rounded-xl bg-white/70 text-foreground flex items-center justify-center flex-shrink-0">
+              <i data-lucide="wallet" class="w-5 h-5"></i>
+            </span>
+            <span class="min-w-0">
+              <span class="block text-sm font-medium text-foreground">记一笔支出</span>
+              <span class="block text-xs text-muted">交通、外食等其他支出，不计入库存</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    `);
+  };
+
   window.submitExpense = function (e) {
     e.preventDefault();
     const form = e.target;
@@ -1283,6 +1345,7 @@
     data.kind = 'expense';
     data.date = form.date.value;
     data.expenseCategory = form.expenseCategory.value;
+    data.currency = form.currency.value;
     data.payment = form.payment.value;
     data.note = form.note.value;
     data.total = parseFloat(form.total.value) || 0;
@@ -3049,6 +3112,13 @@
               <option value="CNY" ${cfg.defaultCurrency==='CNY'?'selected':''}>CNY</option>
             </select>
           </div>
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">汇率</p>
+              <p class="text-xs text-muted">1 人民币 ≈ ? 港币</p>
+            </div>
+            <input type="number" inputmode="decimal" step="0.0001" min="0.0001" value="${cfg.cnyToHkd || 1.08}" onchange="setCnyToHkd(this.value)" class="cx-input cx-input-sm w-28">
+          </div>
         </div>
       </div>
 
@@ -3383,6 +3453,19 @@
   window.setCurrency = function (cur) {
     const cfg = getConfig();
     cfg.defaultCurrency = cur;
+    setConfig(cfg);
+    render();
+  };
+  // 修改汇率：只允许正数，非法值拒绝并回到原值；只改 config，不动任何历史单据
+  window.setCnyToHkd = function (v) {
+    const r = parseFloat(v);
+    if (isNaN(r) || r <= 0) {
+      toast('请输入大于 0 的汇率');
+      render();
+      return;
+    }
+    const cfg = getConfig();
+    cfg.cnyToHkd = r;
     setConfig(cfg);
     render();
   };
